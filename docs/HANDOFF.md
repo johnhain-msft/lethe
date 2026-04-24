@@ -85,21 +85,31 @@ Two tracks, both committed-to by synthesis §5:
 Convert the settled shape (Graphiti substrate + Lethe runtime + MCP surface) into a layered architecture document + interface contracts. Deliverable: `docs/03-composition.md` (or similar).
 
 **Track B — Gap deep-dives.**
-Synthesis §5 enumerates **eight named gap-brief slots** (plus a possible ninth). Each becomes its own research + recommendation brief under `docs/03-gaps/`:
+Reconciled against PLAN.md §WS3 Track B (all 9 PLAN items accounted for — see synthesis §5 for the full mapping table). Each active slot becomes its own research + recommendation brief under `docs/03-gaps/`:
 
-| Slot | Topic | Synthesis anchor |
+| Slot | Topic | PLAN #WS3 source | Synthesis anchor |
+|---|---|---|---|
+| gap-01 | Retention engine (utility-weighted promotion + demotion) | PLAN #4 | §3.1 |
+| gap-02 | Utility-feedback loop | PLAN #1 | §3.2 |
+| gap-03 | Hybrid scoring weights + tuning methodology | PLAN #2 | §3.3 |
+| gap-04 | Multi-agent concurrency + merge policy (graph layer) | synthesis-extension | §3.4 |
+| gap-05 | Enforced provenance (type-system invariant) | synthesis-extension | §3.5 |
+| gap-06 | Extraction-quality instrumentation | synthesis-extension | §3.7 |
+| gap-07 | Markdown-as-view vs graph-as-source + **scale envelope** (write-amp, concurrent-writes-from-swarm on the markdown surface, retrieval >10k) | PLAN #3 (broadened) | §3.8 |
+| gap-08 | Crash-safety + durability contract | synthesis-extension | §3.10 |
+| gap-09 (optional) | Non-factual memory scoping | synthesis-extension | §3.9 |
+| **gap-10** | **Cross-agent peer messaging** | **PLAN #5 (restored)** | synthesis §5 substrate notes |
+| **gap-11** | **Forgetting-as-safety** | **PLAN #6 (restored)** | synthesis §5 substrate notes |
+| **gap-12** | **Intent classifier design** | **PLAN #8 (restored)** | synthesis §5 substrate notes |
+
+**PLAN items already dispositioned (not WS3 slots):**
+
+| PLAN # | Topic | Disposition |
 |---|---|---|
-| gap-01 | Retention engine (utility-weighted promotion + demotion) | §3.1 |
-| gap-02 | Utility-feedback loop | §3.2 |
-| gap-03 | Hybrid scoring weights + tuning methodology | §3.3 |
-| gap-04 | Multi-agent concurrency + merge policy | §3.4 |
-| gap-05 | Enforced provenance (type-system invariant) | §3.5 |
-| gap-06 | Extraction-quality instrumentation | §3.7 |
-| gap-07 | Markdown-as-view vs graph-as-source-of-truth | §3.8 |
-| gap-08 | Crash-safety + durability contract | §3.10 |
-| gap-09 (optional) | Non-factual memory scoping | §3.9 |
+| 7 | contradiction resolution beyond timestamp-invalidation | committed by WS2: bi-temporal invalidate, don't delete (§2.3 below; synthesis §1.2) |
+| 9 | eval-set construction without confirmation bias | deferred to WS4 (`docs/04-eval-plan.md`) |
 
-Each gap-brief should follow a per-gap template: **what the gap is / why it matters for Lethe / state of the art (cite lit-review briefs) / candidate v1 approaches with trade-offs / recommendation + residual unknowns.**
+Each gap-brief should follow a per-gap template: **what the gap is / why it matters for Lethe / state of the art (cite lit-review briefs) / candidate v1 approaches with trade-offs / recommendation + residual unknowns.** For gap-10 / gap-11 / gap-12 the WS3 author should start from the substrate pointers and v1 heuristic seeds in synthesis §5 rather than re-hunting sources.
 
 Cost/latency evaluation (synthesis §2.6) is a WS4 concern, not WS3.
 

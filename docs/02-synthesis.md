@@ -126,8 +126,10 @@ WS4 benchmarks report (accuracy, tokens/query, p95 latency) triples. Lethe publi
 ### 3.7 Extraction-quality instrumentation (fills §2.7)
 Lethe logs LLM-extraction decisions with confidence, exposes a "dispute" path, and supports re-extraction when the substrate's extraction was wrong. WS3 gap #6.
 
-### 3.8 Markdown-as-view, graph-as-source-of-truth (fills §2.8)
+### 3.8 Markdown-as-view, graph-as-source-of-truth + scale envelope (fills §2.8; PLAN.md §WS3 #3)
 Commit position: graph substrate (Graphiti) is authoritative; markdown surfaces are views generated on consolidation cycles. SCNS's current model is the reverse; Lethe inverts. WS3 gap #7.
+
+**This slot also owns the scale dimensions PLAN.md §WS3 #3 enumerates** — (a) write amplification from multi-agent swarm ("a single source might touch 10–15 wiki pages"), (b) concurrent-write / lock / merge semantics when the writers are agents not humans, (c) retrieval cost past the ~100-source / ~hundreds-of-pages ceiling **brief 21 (Karpathy)** documents. Substrate beyond brief 21's explicit-limits table: **brief 02 MAGMA** four-subspace partitioning reduces per-write fan-out; **brief 06 paper-list** flags markdown-at-scale as recurring survey-level concern; **brief 17 QMD** is the only reviewed tool that publishes on-device retrieval numbers in the markdown-primary regime. Concurrency overlaps gap-04 but is scoped here to the *markdown-view* surface specifically (graph-layer concurrency stays in gap-04). The v1 shape therefore needs three explicit answers inside this slot: a write-amp budget per source-episode, a markdown-view regeneration policy (full vs. incremental vs. on-read), and a documented retrieval ceiling with the fall-back strategy past it.
 
 ### 3.9 Non-factual memory strategy (fills §2.9)
 Even if v1 says "not in scope," the charter addendum must specify how we'll detect needing it and what the extension shape is. Cheap to write now, expensive to retrofit.
@@ -157,22 +159,46 @@ WS3 has two tracks per PLAN.md §WS3. The synthesis points at both:
 
 **Track A — Composition design.** §1 of this synthesis identifies the settled shape: Graphiti as substrate, Lethe as runtime, MCP as the external surface. WS3 Track A converts this into a layered architecture diagram + interface contracts.
 
-**Track B — Gap deep-dives.** §2 identifies **twelve distinct gaps**; §3 maps the **eight** Lethe commits to owning into concrete WS3 brief slots:
+**Track B — Gap deep-dives.** §2 identifies **twelve distinct field-gaps**; Lethe commits to owning a subset of them as WS3 deep-dive slots. The slot list below is **reconciled against PLAN.md §WS3 Track B's nine mandated gaps** — every PLAN item is accounted for, either as an active WS3 slot, as a committed-by-WS2 decision, or as an explicit deferral.
 
-| Gap | Lethe response | WS3 brief slot |
-|---|---|---|
-| 2.1 retention engine | §3.1 | gap-brief #1 |
-| 2.2 utility feedback | §3.2 | gap-brief #2 |
-| 2.3 scoring weights | §3.3 | gap-brief #3 |
-| 2.4 concurrency | §3.4 | gap-brief #4 |
-| 2.5 provenance enforcement | §3.5 | gap-brief #5 |
-| 2.7 extraction-quality | §3.7 | gap-brief #6 |
-| 2.8 markdown-vs-graph authority | §3.8 | gap-brief #7 |
-| 2.12 crash safety | §3.10 | gap-brief #8 |
+**Mapping — PLAN.md §WS3 Track B → WS3 slot (all 9 PLAN items present):**
 
-Nine if §3.9 (non-factual memory scoping) gets its own brief; otherwise folded into the charter addendum.
+| PLAN # | PLAN topic | Disposition | WS3 slot |
+|---|---|---|---|
+| 1 | utility-feedback capture | active | gap-02 |
+| 2 | scoring weight calibration | active | gap-03 |
+| 3 | markdown at scale (write-amp, concurrency, retrieval >10k) | active | gap-07 (broadened — see §3.8) |
+| 4 | unattended consolidation | active | gap-01 |
+| 5 | cross-agent peer messaging | active (restored) | **gap-10** |
+| 6 | forgetting-as-safety | active (restored) | **gap-11** |
+| 7 | contradiction resolution beyond timestamp-invalidation | committed by WS2 (bi-temporal invalidate, don't delete — §1.2) | n/a — HANDOFF §2.3 |
+| 8 | intent classifier design | active (restored) | **gap-12** |
+| 9 | eval-set construction without confirmation bias | deferred | WS4 (`docs/04-eval-plan.md`) |
 
-The eighth explicit gap beyond these (cost/latency, §2.6) is a WS4 concern, not WS3, and is noted in the WS4 brief.
+**WS3 Track-B slot inventory (PLAN-aligned + synthesis-extended):**
+
+| Slot | Topic | Source | Synthesis anchor |
+|---|---|---|---|
+| gap-01 | Retention engine (utility-weighted promotion + demotion) | PLAN #4 | §3.1 |
+| gap-02 | Utility-feedback loop | PLAN #1 | §3.2 |
+| gap-03 | Hybrid scoring weights + tuning methodology | PLAN #2 | §3.3 |
+| gap-04 | Multi-agent concurrency + merge policy (graph layer) | synthesis-extension | §3.4 |
+| gap-05 | Enforced provenance (type-system invariant) | synthesis-extension | §3.5 |
+| gap-06 | Extraction-quality instrumentation | synthesis-extension | §3.7 |
+| gap-07 | Markdown-as-view vs graph-as-source + scale envelope (write-amp, retrieval >10k) | PLAN #3 | §3.8 |
+| gap-08 | Crash-safety + durability contract | synthesis-extension | §3.10 |
+| gap-09 (optional) | Non-factual memory scoping | synthesis-extension | §3.9 |
+| **gap-10** | **Cross-agent peer messaging** | PLAN #5 | see substrate below |
+| **gap-11** | **Forgetting-as-safety** | PLAN #6 | see substrate below |
+| **gap-12** | **Intent classifier design** | PLAN #8 | see substrate below |
+
+**Substrate pointers + v1 heuristic seeds for the three restored slots.** (Not full gap-briefs — just enough for a WS3 author to start without re-hunting sources.)
+
+- **gap-10 peer messaging (PLAN #5).** The gap: how do sub-agents share "I learned X, here's the provenance" without context pollution or losing attribution? Substrate: **brief 15 Letta** ships `shared blocks` across agents but punts concurrent-write conflicts to developers; **brief 16 MS Agent Framework** has no peer-messaging primitive at all (each agent owns its own `AIContextProvider`); synthesis §2.4 on multi-tenant hand-waving; charter §4.1 commits Lethe to `peer_message` as a core verb. V1 heuristic candidate: `peer_message` is a `remember` variant whose `recipient_scope` is another agent or group; delivery is an MCP notification that writes a provenance-stamped candidate episode into the recipient's substrate, not a context-injection; recipients pull via `recall` with a `from_peer` filter. Contrasts with gap-04 which is about concurrent writes into shared memory; gap-10 is about directed agent-to-agent messages with bounded blast radius.
+- **gap-11 forgetting-as-safety (PLAN #6).** The gap: the field treats forgetting as a cost/scale tool, not a safety primitive; how do we prevent reinforcement of bad beliefs, poisoned episodes, and minority-hypothesis suppression? Substrate: **brief 04 Memory-as-Metabolism** is the richest source — explicit "safety story is partial" call-out, minority-hypothesis retention proposal, three-timescale safety framing (immediate / consolidation-cycle / long-horizon); **brief 02 MAGMA** causal-edge partition enables targeted unlearning; **brief 14 Graphiti issue #1300** shows the substrate has no decay/unlearn at all; charter §1 ("river of forgetting" framing) names this as a Lethe identity commitment. V1 heuristic candidate: `forget` must be a first-class API verb (not implicit via decay) with three distinct modes — `invalidate` (bi-temporal, per §1.2, reversible), `quarantine` (excluded from retrieval but preserved for audit), `purge` (hard delete, rare, logged). Minority-hypothesis retention = a retention flag that blocks demotion for the last representative of a contradicted cluster. This slot is high-leverage given the project name.
+- **gap-12 intent classifier design (PLAN #8).** The gap: what intents, what classifier mechanism, what fallback on misclassification? Substrate: **brief 02 MAGMA** provides the cleanest taxonomy — `{Why, When, Entity}` — and routes each intent to a different subspace traversal; **brief 16 MS Agent Framework** has no intent primitive, leaving routing to the developer; charter §4.1 commits to "intent-aware retrieval routing." V1 heuristic candidate: adopt the MAGMA `{Why, When, Entity, What}` four-intent taxonomy (`What` = semantic/factual recall, the default); classifier is a small LLM call on the `recall` request string with a rule-based fallback (question-word heuristics: "why…" → causal, "when…" → temporal, "who/what-entity…" → entity, else → semantic); misclassification fallback is parallel-route + union-then-rank so intent error degrades precision rather than producing zero results. Feeds gap-03 scoring because intent changes the weight tuple.
+
+The twelfth field-gap beyond these (cost/latency, §2.6) is a WS4 concern, not WS3, and is noted in the WS4 brief.
 
 **Named non-goals for v1** (with lit-review citations): parametric memory governance (§2.10), ontology evolution (§2.11). Charter update recommended.
 
