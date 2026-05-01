@@ -217,3 +217,119 @@ If any of those fails, read this handoff and the prior session handoff (`~/.copi
 Lethe is the **retention runtime layer** over Graphiti's bi-temporal graph substrate, exposed via MCP, that **closes the utility-feedback loop** no reviewed system closes today. Its distinctive v1 commitments are utility-weighted promotion/demotion, enforced provenance, multi-agent concurrency, and published scoring defaults — each justified by a specific cross-paper gap documented in `docs/02-synthesis.md` §2. Everything else — substrate choice, write-path shape, contradiction policy, API vocabulary, benchmark set — is inherited from cross-paper consensus and does not need to be re-invented.
 
 Good luck.
+
+---
+
+# Post-WS3 — gap deep-dives + composition design landed
+
+**Date:** 2026-04-25
+**Branch:** `main` — all WS3 work pushed.
+**Session:** `f0f31342` (this DEV session).
+
+WS3 is complete. WS4 (eval), WS5 (scoring formalism), WS6 (API), WS7 (migration), and WS8 (deployment) authors should read this section + the linked artifacts before starting.
+
+## 7. WS3 deliverables
+
+### 7.1 Composition design (Track A)
+
+`docs/03-composition-design.md` — 423 lines. Reference architecture for the runtime. Read this *before* any gap brief.
+
+Key commitments:
+- **Five named stores** (§2): Graphiti (S1, fact-canonical), SQLite metadata + ledger + log (S2/S5), vector index (S3, rebuildable), markdown synthesis pages (S4a, authored), markdown projections (S4b, derived).
+- **ACID boundaries** (§5): T1 = `remember` synchronous (S1 episode + S2 arrival event); T2 = `promote/forget` synchronous (S2 flag + S5 audit). Everything else eventual-consistent + reconcilable.
+- **Failure-mode matrix** (§7): 13-row table + 2-stores-down combinations. WS6 + WS7 lean on this most.
+- **Recommended topology** (§8): hybrid layered. Dividing line at *factual claim vs. authored synthesis*.
+- **Open seams handed to gap briefs** (§10).
+
+### 7.2 Gap briefs (Track B)
+
+`docs/03-gaps/gap-01..gap-14.md` — 14 briefs, 1742 lines total.
+
+| Gap | Slug | Tier | Lines | PLAN # |
+|---|---|---|---|---|
+| gap-01 | retention-engine | first-class | 149 | #4 unattended consolidation |
+| gap-02 | utility-feedback | first-class | 136 | #1 |
+| gap-03 | scoring-weights | first-class | 169 | #2 |
+| gap-04 | multi-agent-concurrency | extension | 65 | (synthesis-extension) |
+| gap-05 | provenance-enforcement | extension | 100 | (synthesis-extension) |
+| gap-06 | extraction-quality | extension | 73 | (synthesis-extension) |
+| gap-07 | markdown-scale | first-class | 170 | #3 (broadened) |
+| gap-08 | crash-safety | extension | 103 | (synthesis-extension) |
+| gap-09 | non-factual-memory | extension | 75 | (synthesis-extension) |
+| gap-10 | peer-messaging | first-class | 111 | #5 |
+| gap-11 | forgetting-as-safety | first-class | 171 | #6 |
+| gap-12 | intent-classifier | first-class | 100 | #8 |
+| gap-13 | contradiction-resolution | first-class | 202 | #7 |
+| gap-14 | eval-set-bias | first-class | 95 | #9 |
+
+All 9 PLAN-mandated gaps are first-class with ≥80 lines.
+
+### 7.3 Commits
+
+```
+db427aa  docs(ws3): quality+eval briefs (14 eval-set-bias, 06 extraction-quality, 09 non-factual-memory)
+5a7d934  docs(ws3): multi-agent briefs (10 peer-messaging, 12 intent-classifier, 05 provenance-enforcement)
+15a91b4  docs(ws3): surface/scale briefs (07 markdown-scale, 04 multi-agent-concurrency, 08 crash-safety)
+7fde808  docs(ws3): forgetting + contradiction briefs (11, 13)
+c07f515  docs(ws3): lifecycle gap briefs (01-03)
+6996f73  docs(ws3): composition design (track A)
+```
+
+## 8. Pointers for downstream workstreams
+
+### 8.1 WS4 — eval plan author
+
+Read first:
+1. `docs/03-gaps/gap-14-eval-set-bias.md` — **your input constraints**. WS4 must satisfy §5(1)–(5) (multi-source eval set, capped author-share, contamination defenses, drift signals, two-strata reporting).
+2. `docs/03-gaps/gap-12-intent-classifier.md` — classifier accuracy is your headline metric.
+3. `docs/03-gaps/gap-06-extraction-quality.md` §3 — extraction F1 + per-domain calibration.
+4. `docs/03-gaps/gap-01-retention-engine.md` §6 — eval signals that decide keep/replace/extend on the dream-daemon (per-phase).
+5. `docs/03-gaps/gap-02-utility-feedback.md` — utility signals are *not* the eval set; relationship clarified there.
+6. `docs/03-composition-design.md` §7 — failure-modes you must inject (chaos/fault eval).
+
+### 8.2 WS5 — scoring formalism author
+
+Read first:
+1. `docs/03-gaps/gap-03-scoring-weights.md` — your starting point; defines weight categories, calibration loop, defaults to publish.
+2. `docs/03-gaps/gap-02-utility-feedback.md` — signal taxonomy that feeds scoring.
+3. `docs/03-gaps/gap-09-non-factual-memory.md` §7 — different memory shapes score differently.
+4. `docs/03-gaps/gap-12-intent-classifier.md` §8 touch-point — classifier output drives per-class scoring.
+5. `docs/03-composition-design.md` §3 — what's stored where; scoring metadata lives in S2.
+
+### 8.3 WS6 — API author
+
+Read first:
+1. `docs/03-composition-design.md` §3 (ownership matrix) + §4 (read/write paths) + §5 (consistency model). This is your contract.
+2. `docs/03-composition-design.md` §7 (failure-mode table) — error semantics per verb.
+3. `docs/03-gaps/gap-04-multi-agent-concurrency.md` §5 — version-CAS contract on writes; `409` retry semantics.
+4. `docs/03-gaps/gap-08-crash-safety.md` §3 — idempotency-key contract on every write verb.
+5. `docs/03-gaps/gap-10-peer-messaging.md` §3 — `peer_message`, `peer_message_pull`, `peer_message_status` verbs.
+6. `docs/03-gaps/gap-11-forgetting-as-safety.md` §3 — `forget(soft|purge|deny)` semantics, retention proofs.
+7. `docs/03-gaps/gap-12-intent-classifier.md` — `remember(intent=...)` API shape.
+8. `docs/03-gaps/gap-05-provenance-enforcement.md` §3 — `recall` response shape includes provenance.
+
+### 8.4 WS7 — migration author
+
+Read first:
+1. `docs/03-composition-design.md` §7 (failure modes) + §5 (consistency model) — what an in-place migration must preserve.
+2. `docs/03-gaps/gap-08-crash-safety.md` §3.5 — `lethe-audit lint --integrity` is a phase-gate in WS7.
+3. `docs/03-gaps/gap-05-provenance-enforcement.md` §6 — episode-id stability is a migration invariant.
+4. `docs/03-gaps/gap-09-non-factual-memory.md` §7 — SCNS `~/.claude/CLAUDE.md` → preference pages; SCNS synthesis pages → narrative pages.
+5. `docs/03-gaps/gap-04-multi-agent-concurrency.md` §6 — SCNS broker-DB row-locking translates to CAS contracts.
+
+### 8.5 WS8 — deployment author
+
+Read first:
+1. `docs/03-composition-design.md` §7 — degraded modes are deploy-cadence aware.
+2. `docs/03-gaps/gap-01-retention-engine.md` §3.2 — dream-daemon scheduler config (gate interval, lock heartbeat).
+3. `docs/03-gaps/gap-08-crash-safety.md` §3.4 + §3.5 — startup integrity check + lock recovery.
+4. `docs/03-gaps/gap-14-eval-set-bias.md` §5(3) — drift detector + monthly re-eval cadence.
+
+## 9. Stopping criteria — evidence
+
+1. ✅ `docs/03-composition-design.md` — committed `6996f73`, pushed.
+2. ✅ `docs/03-gaps/` — 14 briefs; 9 first-class ≥80 lines; all template sections substantive.
+3. ✅ Incremental commits (6 batches: composition + 5 brief batches) on `main`; all pushed.
+4. ✅ This Post-WS3 section appended to HANDOFF.md.
+
+WS3 is closed. The next QA pass should ask: **"Does WS3 give a WS4 (eval) author and a WS5 (scoring) author enough substrate to start without re-doing research?"** §8.1 + §8.2 above are the explicit reading orders.
