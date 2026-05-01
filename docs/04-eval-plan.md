@@ -33,7 +33,7 @@ Two epochs are designed in from day one (gap-14 §5(1) closing clause; HANDOFF �
 
 ### 2.1 v1.0 — launch (preliminary, operator slice empty)
 
-**v1.0 composition (acknowledged-and-deferred deviation from gap-14 §5(1)):** 0% operator / 35% adversarial / 25% ablation / 25% synthetic / 15% author-curated. The 30% operator-derived target from gap-14 §5(1) is a **v1.x target, not a v1.0 launch target**. Lethe ships before any operator data exists; there is no pre-existing operator-trace source the project will ingest from. (In particular, SCNS `session_store` is **not** a v1 input — Lethe stands on its own, and SCNS remains a design-pattern reference only.) The deferral is explicit, traceable in §13, and carried by the two-epoch design.
+**v1.0 composition (acknowledged-and-deferred deviation from gap-14 §5(1)):** 0% operator / 35% adversarial / 25% ablation / 25% synthetic / 15% author-curated. The 30% operator-derived target from gap-14 §5(1) is a **v1.x target, not a v1.0 launch target**. Lethe ships before any operator data exists; there is no pre-existing operator-trace source the project will ingest from. (In particular, SCNS `session_store` is **not** a v1 input — Lethe stands on its own, and SCNS remains a design-pattern reference only.) The deferral is explicit, traceable in Appendix A, and carried by the two-epoch design.
 
 **Headline-tag (mandatory on every v1.0 public report or comparison):**
 
@@ -145,7 +145,7 @@ Per gap-14 §3 taxonomy. v1.0 percentages reflect the operator-empty deferral (�
 **Synthetic LLM-generated (v1.0 share: 25%; v1.x target: 15%).**
 
 - LLM authors cases against the same seven-class taxonomy. Tagged `source=synthetic`. Cases are visible to the harness but **never** counted in the operator+adversarial+ablation+replay-only stratum (§5.9).
-- Spot-check protocol (gap-14 §6): at v1.0, **10% of synthetic cases** per batch are reviewed by author + adversary (doubled from the v1.x 5% to compensate for the elevated synthetic share); if disagreement > 15%, the entire batch is distrusted (set aside, not deleted; tagged `synthetic_distrusted`). The disagreement-rate is itself a metric, emitted on every build.
+- Spot-check protocol (gap-14 §6): at v1.0, **10% of synthetic cases** per batch are reviewed by author + adversary (doubled from the v1.x 5% to compensate for the elevated synthetic share); if disagreement > 15%, the entire batch is distrusted (set aside, not deleted; tagged `synthetic_distrusted`). The disagreement-rate is itself a metric, emitted on every build (see `scripts/eval/metrics/emitter.py`).
 - v1.x reverts to the 5% spot-check sample once synthetic share drops back to 15%.
 
 **Author-curated (v1.0 share: 15%; v1.x cap: 10%).**
@@ -459,7 +459,7 @@ For a public comparison (Lethe vs. another system; or Lethe v1.0 vs. v1.x):
 
 ### 11.4 CI-gate report
 
-Every PR touching scoring (WS5), retention (gap-01), extraction (gap-06), or eval (this doc) runs the harness and emits a CI-gate report. Headline regressions on the strict stratum > 5% block merge unless the PR description includes an `eval-regression-justified:` line with a reviewer.
+Every PR touching scoring (WS5), retention (gap-01), extraction (gap-06), or eval (this doc) runs the harness and emits a CI-gate report. Headline regressions on the strict stratum > 5% block merge unless the PR description includes an `eval-regression-justified:` line with a reviewer and project lead approval (deploy-policy specifics: WS8).
 
 ---
 

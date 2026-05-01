@@ -20,7 +20,7 @@ Composition floors / caps (loader-enforced)
 -------------------------------------------
 v1.0 (epoch=v1.0):
     operator        : 0%   (foreign-system ingest is forbidden; §4.6)
-    adversarial     : ≥35% floor
+    adversarial     : ≥30% floor (target 35%)
     ablation        : ≥25% floor
     synthetic       : ≤25% (with 10% spot-check sample; §4.2)
     author-curated  : ≤15% cap

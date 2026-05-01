@@ -48,18 +48,30 @@ Bias-resistance invariants enforced by the loader (`loader.py`):
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 
 
-def Case(*args, **kwargs):
-    """Placeholder for the Case dataclass. Wired but inert.
+@dataclass(frozen=True)
+class Case:
+    """Frozen dataclass shell for the Lethe-native eval-set Case.
 
-    The real implementation will be a frozen dataclass; today it raises so
-    that downstream code that tries to construct cases fails loudly.
+    Field set is the public surface enumerated in the module docstring;
+    types are loose (`object`) for the enum-typed fields because the
+    SourceClass / IntentClass / Provenance types are not yet defined in
+    this WS4 skeleton. Constructing a Case at runtime is allowed (the
+    shell imports cleanly so downstream type-checking works); validation
+    and the bias-resistance invariants still live in `loader.py` and will
+    fail loudly there.
     """
-    raise NotImplementedError(
-        "lethe_native.schema.Case is a WS4 skeleton stub; "
-        "see docs/04-eval-plan.md §4 and gap-14 §3"
-    )
+
+    case_id: str
+    version: int
+    source: object
+    intent_class: object
+    provenance: object
+    contamination_protected: bool
+    tags: tuple[str, ...]
+    payload: object
 
 
 if __name__ == "__main__":
