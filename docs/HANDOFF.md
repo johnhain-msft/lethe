@@ -358,3 +358,80 @@ Read first:
 4. ✅ This Post-WS3 section appended to HANDOFF.md.
 
 WS3 is closed. The next QA pass should ask: **"Does WS3 give a WS4 (eval) author and a WS5 (scoring) author enough substrate to start without re-doing research?"** §8.1 + §8.2 above are the explicit reading orders.
+
+---
+
+## 10. Post-WS4 — what the WS4 author produced
+
+### 10.1 Workstream completed
+
+- ✅ **WS4 — Eval & Benchmark plan** (per PLAN §WS4). Two-epoch design (v1.0 preliminary / v1.x post-operator-data) baked in throughout. Headline metrics, Lethe-native eval set with capped author-share, contamination defenses, drift signals, two-strata reporting all present and traceable to gap-14 §5(1)–(5).
+
+### 10.2 Commits on `main` (post-WS3)
+
+- `499f8c8` — `docs(ws4): add eval & benchmark plan`
+- `1c38670` — `feat(ws4): scripts/eval skeleton stubs`
+- (this commit) — `docs(handoff): post-WS4 update for WS4-QA + WS5`
+
+### 10.3 Architectural correction landed during WS4 — Lethe stands on its own
+
+A mid-WS4 course correction revoked an earlier assumption that SCNS `session_store` would be the v1.0 operator-trace source. The corrected position, encoded in `docs/04-eval-plan.md` and binding on all downstream WS:
+
+- **Lethe is independent.** No Lethe artifact reads from `~/.scns/`. No Lethe code imports from the SCNS repo. No Lethe eval input comes from `session_store`. The SCNS dream-daemon remains a **design-pattern reference only** (per WS1 audit and gap-01); it is not a substrate, dependency, or data source.
+- **The v1.0 operator slice is empty (0%).** gap-14 §5(1)'s 30% operator-derived target is a **v1.x target, not a v1.0 launch target**. v1.0 reports are tagged `preliminary — operator slice empty (0%); author + adversarial + ablation + synthetic only; v1.x target 30% operator-derived` (mandatory headline-tag, rendered by `metrics/emitter.py`, non-removable at the harness layer).
+- **The v1.x operator slice comes from Lethe's own opt-in audit-log capture.** `docs/04-eval-plan.md` §4.6 specifies the pipeline; `scripts/eval/lethe_native/loader.py::capture_opt_in_trace` defines the contract surface; WS6 owns the opt-in verb implementation.
+
+**Binding on WS5, WS6, WS7:**
+- **WS5 (scoring)** — do not plan calibration data sourced from SCNS or any foreign system. Use the eval-set output as ground truth (per `docs/04-eval-plan.md` §6 per-phase signals).
+- **WS6 (API)** — do not plan a SCNS compatibility shim that reads SCNS data into Lethe stores. Do plan the opt-in audit-log capture verb that powers v1.x operator-trace ingest (`docs/04-eval-plan.md` §4.6 contract).
+- **WS7 (migration)** — eval-set ingest is **not** a WS7 concern. WS7 should not plan against SCNS or any foreign system as a Lethe substrate or data source.
+
+### 10.4 Reading order for **WS4-QA** (fresh-eyes pass)
+
+The WS4-QA author should approach this cold and answer one question: **does this give a WS5/WS6 author enough substrate to start without re-doing eval-design research?**
+
+Read in this order:
+
+1. `docs/04-eval-plan.md` start to finish. Pay particular attention to §2 (epochs), §4 (Lethe-native eval set including §4.6 self-collection), §5 (headline metrics), §6 (per-phase dream-daemon signals — WS5's input contract), §7 (chaos eval coverage), §9 (shadow-retrieval), §10 (harness layout), Appendix A (gap-14 §5(1)–(5) traceability matrix — required by stopping criteria).
+2. `scripts/eval/README.md`. Verify the layout described matches the layout in §10.
+3. `scripts/eval/run_eval.py` and one stub from each subdirectory (`adapters/longmemeval.py`, `lethe_native/loader.py`, `metrics/emitter.py`, `shadow/harness.py`, `chaos/faults.py`, `contamination/guard.py`). Verify each names its contract via docstring + cross-ref, and that the stub exits 2 with `"<module>: not implemented (WS4 stub)"` on the inert path.
+4. `docs/03-gaps/gap-14-eval-set-bias.md` §5(1)–(5) cross-checked against `docs/04-eval-plan.md` Appendix A. Are all five constraints addressed §-by-§? Constraint §5(1) is the one to scrutinize: it must be marked **acknowledged-and-deferred** at v1.0 (operator slice = 0%), with the v1.x migration plan explicit.
+5. `docs/03-gaps/gap-12-intent-classifier.md` and `docs/03-gaps/gap-06-extraction-quality.md` cross-checked against §5.6 and §5.7 of the eval plan. Are macro-F1 (gap-12 headline) and per-domain extraction calibration (gap-06 §3) both first-class metrics?
+6. `docs/03-gaps/gap-01-retention-engine.md` §6 cross-checked against §6 of the eval plan. Are the per-phase signals (extract / score / promote / demote / consolidate / invalidate) named with measurable signals and stratification?
+7. `docs/03-composition-design.md` §7 + §7.1 cross-checked against §7 of the eval plan. Is every named failure mode covered by the chaos harness, including the two-stores-down matrix?
+
+**Anti-checklist (things that should NOT be present):**
+- Any WS4 artifact that reads from `~/.scns/` or imports from the SCNS repo.
+- Any v1.0 report path that emits a headline number without the preliminary-tag wording.
+- Any public-benchmark report path that emits accuracy without an accompanying cost row (§3.4 invariant).
+- Any case-set build that bypasses the §4.1 floors/caps or the §4.3 symmetry policy.
+
+A QA failure on any of the above is a P0; a QA failure on a missing or weak cross-ref is a P1.
+
+### 10.5 Reading order for **WS5** (scoring formalism author)
+
+WS5 inherits an explicit input contract from WS4: the per-phase eval signals in `docs/04-eval-plan.md` §6 are the keep/replace/extend criteria for the scoring function modules.
+
+Read in this order:
+
+1. `docs/03-gaps/gap-03-scoring-weights.md` — your starting point, unchanged.
+2. `docs/03-gaps/gap-02-utility-feedback.md` — signal taxonomy that feeds scoring; the `δ·utility_signal` term.
+3. **`docs/04-eval-plan.md` §6** — per-phase signals; this is what your scoring math will be calibrated against. WS5's keep/replace/extend decisions on extract / score / promote / demote / consolidate / invalidate are gated by the metrics named in §6.
+4. **`docs/04-eval-plan.md` §5.5** — promotion precision **and** demotion recall (gap-01 §6 needs both). Your scoring-side promotion/demotion threshold tuning targets these.
+5. `docs/03-gaps/gap-09-non-factual-memory.md` §7 — different memory shapes score differently; per-class scoring must accommodate `remember:preference` separately from `remember:fact`.
+6. `docs/03-gaps/gap-12-intent-classifier.md` §8 touch-point — classifier output drives per-class scoring.
+7. `docs/03-composition-design.md` §3 — what's stored where; scoring metadata lives in S2.
+
+**Binding constraints from WS4 (do not work around):**
+- Do not source calibration data from SCNS or any foreign system. Use Lethe's own eval-set ground truth.
+- The two-strata reporting requirement (eval plan §5.9) means scoring weights should be tuned against the **strict stratum** (operator + adversarial + ablation + replay-only), not the all-cases stratum, when those diverge. At v1.0 the strict stratum has no operator share; tune against adversarial + ablation + replay-only and accept the deferral cost.
+- The mandatory headline-tag wording at v1.0 means any scoring-related public report must render the tag; `metrics/emitter.py::render_headline_tag` is the single rendering point.
+
+### 10.6 Open items / follow-throughs WS4 left for downstream
+
+- **Adversarial reviewer pipeline (v1.0 35% slice).** WS4 specifies "internal-but-different-team reviewer"; the reviewer-recruitment and review-tracking workflow is a v1.0 schedule risk. Owner: WS8 (deployment) / project lead.
+- **Opt-in audit-log capture verb (WS6).** v1.x operator-trace ingest depends on this verb. Contract is set in `scripts/eval/lethe_native/loader.py::capture_opt_in_trace`; implementation owner is WS6.
+- **Chaos eval CI integration (WS8).** The chaos harness is wired (`scripts/eval/chaos/faults.py`) but the deploy-cadence integration (when the chaos run executes against a candidate build) is WS8's call.
+- **Drift detector (gap-14 §5(3) / eval plan §8).** WS4 specifies the cadence (monthly held-set re-eval; quarterly fresh adversarial slice; annual eval-set version bump). WS8 schedules.
+
+WS4 is closed. The next QA pass should ask: **"Does WS4 give a WS5 (scoring) author and a WS6 (API) author enough substrate to start without re-doing eval-design research?"** §10.4 (QA reading order) and §10.5 (WS5 reading order) are the explicit answers.
