@@ -27,6 +27,7 @@ If Lethe ships without an answer:
 - **Brief 21 Karpathy.** Synthesis pages = authored prose; canonical form for narratives.
 - **Brief 02 MAGMA.** Procedural memory is a separate module from declarative.
 - **SCNS audit §3.** Synthesis pages serve all three by author convention (preferences in `~/.claude/CLAUDE.md`, procedures in synthesis pages, narratives in design notes); no system-level distinction.
+- **Brief 22 auto-memory** (`02-lit-review/22-auto-memory.md`) is a precedent for episodic-preference recall via a thin CLI over a host session store; validates the read-side surface but does not address Lethe's promotion or write-side concerns.
 
 ## 3. Storage shapes (specification)
 

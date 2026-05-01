@@ -45,6 +45,10 @@ BM25 + vector + optional rerank. **QMD** (brief 17) does it on-device with RRF +
 
 **Letta's `enable_sleeptime=true`** is live. The SCNS dream-daemon is live on JH's personal stack. Community best-practice (from Letta forum, summarized in brief 15) already specifies a **policy ladder**: dedup every run / light consolidation end-of-session / full reorg weekly / hierarchical rollup monthly. This is no longer research-speculative.
 
+### 1.9 The recall verb is shipping as a sibling-product pattern in coding-agent tooling
+
+A class of tools sits one tier *below* a memory system: a **single-user thin adapter over a host session store**, packaged as a CLI the agent invokes itself. **Brief 22 auto-memory** (`session-recall`) is the canonical example — ~1,900 lines of zero-dependency Python over Copilot CLI's `~/.copilot/session-store.db`, read-only, schema-checked, ~50 tokens per prompt. **Brief 17 QMD** is adjacent on the index-side (markdown corpus instead of session store, MCP instead of stdout, but the same "thin local CLI for the agent's own use" shape). **Brief 21 Karpathy** completes the triad on the substrate-side (a wiki the agent reads and writes through git). None of these is a substrate candidate for Lethe; together they are evidence that the **`recall` verb is broadly demanded in coding-agent products specifically**, often packaged below the memory-system tier. The lesson for Lethe: the read API must be cheap to wrap, token-budgeted, and stable — a future thin client should be able to re-front Lethe the way auto-memory re-fronts Copilot CLI's SQLite.
+
 ---
 
 ## 2. Where the field collectively hand-waves
