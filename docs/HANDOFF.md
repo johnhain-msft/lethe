@@ -264,6 +264,8 @@ Key commitments:
 
 All 9 PLAN-mandated gaps are first-class with ≥80 lines.
 
+**Scope-expansion vs. §2.2 disposition.** §2.2 (pre-WS3) listed PLAN #7 as "committed by WS2" and PLAN #9 as "deferred to WS4," excluding both from WS3 slots; WS3 deliberately upgraded these to first-class briefs — gap-13 became "monitored stress regimes" (not re-litigation of bi-temporal invalidate) and gap-14 became the first-class WS4 input-constraint document. The §2.2 dispositions are superseded for these two items only.
+
 ### 7.3 Commits
 
 ```
@@ -287,6 +289,8 @@ Read first:
 5. `docs/03-gaps/gap-02-utility-feedback.md` — utility signals are *not* the eval set; relationship clarified there.
 6. `docs/03-composition-design.md` §7 — failure-modes you must inject (chaos/fault eval).
 
+**Reporting epochs.** v1.0 eval reports will be tagged **"preliminary, author-share above threshold"** until operator data accumulates (per `gap-14 §5(1)` and §5 step "If WS4 cannot meet (1) at launch"); plan for two reporting epochs (v1.0 launch / v1.x once operator-derived slice fills in) from day one.
+
 ### 8.2 WS5 — scoring formalism author
 
 Read first:
@@ -304,9 +308,10 @@ Read first:
 3. `docs/03-gaps/gap-04-multi-agent-concurrency.md` §5 — version-CAS contract on writes; `409` retry semantics.
 4. `docs/03-gaps/gap-08-crash-safety.md` §3 — idempotency-key contract on every write verb.
 5. `docs/03-gaps/gap-10-peer-messaging.md` §3 — `peer_message`, `peer_message_pull`, `peer_message_status` verbs.
-6. `docs/03-gaps/gap-11-forgetting-as-safety.md` §3 — `forget(soft|purge|deny)` semantics, retention proofs.
-7. `docs/03-gaps/gap-12-intent-classifier.md` — `remember(intent=...)` API shape.
-8. `docs/03-gaps/gap-05-provenance-enforcement.md` §3 — `recall` response shape includes provenance.
+6. `docs/03-composition-design.md` §3.2 — `recall_synthesis(uri | query)` verb for S4a-targeted (markdown synthesis) retrieval; distinct from fact-path `recall`. Plus §3.5 — implicit `preferences[]` prepend on every `recall` response (always-load path).
+7. `docs/03-gaps/gap-11-forgetting-as-safety.md` §3 — `forget(soft|purge|deny)` semantics, retention proofs.
+8. `docs/03-gaps/gap-12-intent-classifier.md` — `remember(intent=...)` API shape.
+9. `docs/03-gaps/gap-05-provenance-enforcement.md` §3 — `recall` response shape includes provenance.
 
 ### 8.4 WS7 — migration author
 

@@ -135,7 +135,7 @@ Concretely:
 A reproducible protocol, runnable from `scripts/eval/tune-weights.sh` (WS4 lays this down):
 
 1. **Eval set.** LongMemEval primary; LoCoMo secondary; SCNS-native held-out (gap-14). Split 70/15/15 train/val/test; sweep on train+val; report on test.
-2. **Search space.** Each weight in [0, 1]; sum-to-1 constraint per tuple (normalized post-sample).
+2. **Search space.** Each weight in [0, 1]; sum-to-1 over the four positive contribution weights (α, β, γ, δ) at consolidate-time and (w_sem, w_lex, w_graph, w_intent, w_utility) at recall-time, normalized post-sample; ε is a separate penalty magnitude in [0, 1], sampled independently and not part of the convex combination.
 3. **Trials.** 50 BO trials baseline; expand to 100 if marginal-improvement curve hasn't flattened.
 4. **Objective.** `0.7 · accuracy_composite + 0.3 · (1 - normalized_cost)`. Cost = mean tokens/query × p95 latency in seconds, normalized to the static-weights baseline.
 5. **Output.** One JSON per swept tuple + a 95% bootstrap CI; markdown report committed to `docs/05-scoring-design.md`.

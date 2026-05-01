@@ -56,7 +56,7 @@ Read paths per MCP verb. Order matters: it determines the failure-mode degradati
 
 ### 3.1 `recall(query, intent?, scope?)`
 
-The hot path. Latency budget aimed at p95 ≤ ~250 ms (refined in WS4).
+The hot path. Latency budget aimed at p95 ≤ ~250 ms (refined in WS4) **under heuristic-only intent classification; LLM-residual recall p95 measured separately** (cross-link: `gap-12 §7` "LLM latency budget" residual unknown).
 
 ```
 recall →
@@ -70,7 +70,8 @@ recall →
   4. union → rerank by weight tuple          [S1 attributes + S3 distance + S2 utility-prior]
   5. enforce provenance (gap-05)             [drop any candidate fact without an episode-id pointer]
   6. write recall_id to S2 ledger            [synchronous; this is the utility-feedback hook]
-  7. return (facts, recall_id, provenance) →
+  7. prepend always-load preferences (§3.5)   [implicit; capped per gap-09 §6 always-load bandwidth]
+  8. return (facts, recall_id, provenance, preferences) →
 ```
 
 Which stores get touched: **S1 always, S3 usually, S2 always, S4/S5 never.** The recall path does not depend on S4 (markdown) or S5 (consolidation log). Markdown is for humans; consolidation log is for audits.
@@ -86,6 +87,19 @@ Reads from S1 with a `from_peer=true & recipient_scope=<self>` filter. Detail in
 ### 3.4 Lint / audit reads
 
 Audit queries ("show me every fact derived from episode-id X") read S1 (provenance edges) joined with S5 (consolidation history). These are slow-path; no latency budget; intended for humans and CI lint hooks.
+
+### 3.5 Tenant-init bootstrap (always-load preference path)
+
+Per `gap-09 §3`, S4a synthesis pages tagged `kind=preference` are **always-load**: the runtime treats them as MemGPT-style "core memory" that must be visible to the agent on every turn, not a recall-on-demand resource. The composition mechanism is an **implicit prepend on every `recall` response** rather than a separate verb or a session-start preload:
+
+1. On `recall`, after step 6 (ledger write), the runtime fetches the tenant's `kind=preference` pages from S4a (qmd-class index over the markdown corpus, scoped by tenant).
+2. Their text is concatenated and prepended to the response payload under a `preferences[]` field, distinct from `facts[]` so callers cannot confuse a preference with a returned fact.
+3. The total preference payload is capped per `gap-09 §6` "always-load bandwidth" (target ≤ 10 KB per tenant); over-cap pages truncate by recency-of-revision and surface a `preferences_truncated=true` flag.
+4. Stores touched: **S4a always, S2 once** (a counter for cap-overflow telemetry); no S1 fetch on this path. Latency is bounded by the qmd-class index, not the graph walk.
+
+This path is **on every `recall`**, not a one-shot tenant-init step — "tenant-init" is a misnomer kept for naming continuity with MemGPT's "core memory always loaded." A first-class `recall_synthesis(kind=preference)` call works too, but agents should not need it; the prepend makes preferences ambient.
+
+WS6 owns the wire format of `preferences[]`; this section commits the mechanism.
 
 ---
 
@@ -330,7 +344,7 @@ flowchart TB
 
   subgraph runtime ["Lethe runtime"]
     direction TB
-    MCP["MCP server\n(remember / recall / promote / forget / peer_message)"]
+    MCP["MCP server\n(remember / recall / recall_synthesis /\npromote / forget /\npeer_message / peer_message_pull / peer_message_status)"]
     ROUTER["Intent classifier\n(gap-12)"]
     SCORER["Scorer\n(gap-03 weights, gap-02 utility prior)"]
     DD["Dream-daemon\n(consolidation control plane;\n01b design note + gap-01)"]
