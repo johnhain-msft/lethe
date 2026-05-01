@@ -18,12 +18,29 @@ Written for the **WS3 agent** (human or AI) who inherits this and executes the g
 | 0 | Project charter | `docs/00-charter.md` | ✅ committed |
 | 1 | SCNS memory audit | `docs/01-scns-memory-audit.md` | ✅ committed |
 | 1 | Dream-daemon design note | `docs/01b-dream-daemon-design-note.md` | ✅ committed |
-| 2 | 21 lit-review briefs | `docs/02-lit-review/01-*.md` … `21-*.md` (skipping gap at 14-20 = Batch C; 21 is Karpathy) | ✅ committed |
+| 2 | 22 lit-review briefs | `docs/02-lit-review/01-*.md` … `22-*.md` (21 = Karpathy; 22 = auto-memory, added post-WS3) | ✅ committed |
 | 2 | Cross-cutting synthesis | `docs/02-synthesis.md` | ✅ committed |
+| 2 | QA review of WS0–WS2 foundation | `docs/QA-WS0-WS2.md` | ✅ APPROVE-WITH-NITS, all nits fixed in `88f8865` |
+| 3 | Composition design (Track A) | `docs/03-composition-design.md` | ✅ committed |
+| 3 | 14 gap briefs (Track B) | `docs/03-gaps/gap-01-*.md` … `gap-14-*.md` | ✅ committed |
+| 3 | QA review of WS3 | `docs/QA-WS3.md` | ✅ APPROVE-WITH-NITS, all nits fixed in `558f830` |
 
 ### 1.2 Commits on `main`
 
 ```
+72a89d9  docs(lit-review): add auto-memory brief (#22) + cite in synthesis §1 and gap-09
+558f830  docs(ws3): apply WS3 QA nits (recall_synthesis, tenant-init bootstrap, latency stratification, ...)
+de6a525  docs(qa): WS3 review (APPROVE-WITH-NITS, 4.7/5)
+df20592  docs(ws3): handoff update for WS4/WS5/WS6/WS7/WS8
+db427aa  docs(ws3): quality+eval briefs (14 eval-set-bias, 06 extraction-quality, 09 non-factual-memory)
+5a7d934  docs(ws3): multi-agent briefs (10 peer-messaging, 12 intent-classifier, 05 provenance-enforcement)
+15a91b4  docs(ws3): surface/scale briefs (07 markdown-scale, 04 multi-agent-concurrency, 08 crash-safety)
+7fde808  docs(ws3): forgetting + contradiction briefs (gap-11, gap-13)
+c07f515  docs(ws3): lifecycle gap briefs (01 retention, 02 utility-feedback, 03 scoring-weights)
+6996f73  docs(ws3): composition design (track A)
+88f8865  docs: reconcile WS3 gap list with PLAN.md §WS3 Track B (fix WS0-WS2 QA MAJORs)
+b9965de  docs(qa): WS0-WS2 foundation QA review (APPROVE-WITH-NITS)
+efa2069  docs: add HANDOFF.md for WS3 entry
 31d2f24  docs(ws2): synthesis across 21-brief lit review
 288cc47  docs(ws2): lit briefs batch C (lifecycle gap + letta + ms-af + qmd + benchmarks)
 8c93189  docs(ws2): lit briefs batch B (paper-list + graphiti)
@@ -32,6 +49,8 @@ d46f60b  docs(ws1): scns memory audit + dream-daemon design note
 96dbdc3  docs(ws0): add project charter
 24e1f9d  chore: initial repo scaffold
 ```
+
+**HEAD = `72a89d9`.** WS0–WS3 + QA + nits + auto-memory addition all on `origin/main`.
 
 ### 1.3 Brief inventory (21/21)
 
@@ -57,7 +76,8 @@ docs/02-lit-review/
 ├── 18-longmemeval.md                Benchmark — primary WS4 metric
 ├── 19-locomo.md                     Benchmark — secondary WS4, coherence + multi-modal
 ├── 20-dmr.md                        Benchmark — sanity check only (saturated)
-└── 21-karpathy-wiki.md              Wiki-as-KB pattern reference
+├── 21-karpathy-wiki.md              Wiki-as-KB pattern reference
+└── 22-auto-memory.md                dezgit2025/auto-memory — sibling product (single-user CLI shim over host session-store; validates recall verb demand; not a substrate)
 ```
 
 All briefs follow the uniform template (problem framing / architecture / scoring-or-retrieval math / API surface / scale claims + evidence / documented limits / how it relates to Lethe / gaps-or-hand-waves). Empty sections = explicit "not applicable: <why>"; nothing fabricated.
