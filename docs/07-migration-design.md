@@ -36,7 +36,7 @@ The headline question every WS7 artifact answers: **given a SCNS corpus on disk 
 These are non-negotiable. Every phase, mapping, and gate below is verifiable against them.
 
 1. **No SCNS shim in the runtime.** Migration is a one-way ingest that calls api verbs, then stops. After cutover, no Lethe code reads `~/.scns/` or imports from the SCNS repo. (HANDOFF §10; api §0.3 #1, §8 anti-checklist last bullet.)
-2. **Deterministic, restartable idempotency.** Every migration write carries `idempotency_key = uuidv7(tenant_id, scns_observation_id)` so partial runs replay cleanly within the api §1.2 24 h TTL. (HANDOFF §12.5 binding bullets 2 + 4.)
+2. **Deterministic, restartable idempotency.** Every migration write carries `idempotency_key = uuidv7(tenant_id, ts_recorded_scns, scns_observation_id)` per §2.3 so partial runs replay cleanly within the api §1.2 24 h TTL. (HANDOFF §12.5 binding bullets 2 + 4.)
 3. **Episode-id stability.** The Lethe `episode_id` minted for a given SCNS observation is invariant across resumes: `episode_id = uuidv7(tenant_id, ts_recorded_scns, scns_observation_id_hash)` with the RFC 9562 layout pinned in api §1.4 (see §0.5). (gap-05 §6 *Cross-runtime provenance* bet, scoped within-tenant.)
 4. **SCNS-side identifier preserved as `provenance.source_uri`.** Audit trails survive the cutover because the SCNS-side identifier rides on every Lethe episode. (HANDOFF §12.5 step 4; gap-05 §3.)
 5. **`capture_opt_in_trace` is not bypassed.** Per-tenant opt-in is the only path for trace data into the eval candidate pool; migration does not side-load eval cases. (HANDOFF §12.5; api §4.1.)
@@ -83,13 +83,15 @@ Read-only audit of `~/.scns/memory/` + `~/.claude/CLAUDE.md` produced the shapes
 | `~/.scns/memory/negative/<uuid>.md` | Negative-rule page with frontmatter (`id`, `category`, `confidence`, `criticStatus`, `appliedTo`) | authored | **in** (§2.1 row 5) |
 | `~/.scns/memory/sessions/<date>/<hash>.md` | Session digest (machine-summarized session, stable per `<hash>`) | derived | **in** (§2.1 row 6) |
 | `~/.scns/memory/daily/<date>.md` | Append-only journal of timestamped tool-use blocks (`## HH:MM:SS`) | derived | **in** (§2.1 row 7) |
-| `~/.scns/memory/weekly/<iso-week>.md`, `monthly/<yyyy-mm>.md` | Synthesis pages (machine-or-human-authored summaries) | authored (per gap-09 §7) | **in** (§2.1 row 4) |
+| `~/.scns/memory/weekly/<iso-week>.md`, `monthly/<yyyy-mm>.md` | Synthesis pages (summaries) | authored (per gap-09 §7) | **in** (§2.1 row 4) |
 | `~/.scns/memory/archive/*.md` | SCNS's invalidation surface (entries moved out of active memory) | n/a | **in** as `forget(invalidate)` cascade (§3.1 phase 8) |
 | `~/.scns/memory/.legacy-lessons/*` | Pre-current-schema lessons | n/a | **in** as `forget(invalidate)` cascade — same path as `archive/` |
 | `~/.scns/memory/MEMORY.md`, `SOUL.md`, `USER.md` | SCNS's `MEMORY.md`-shape projections | derived (S4b-shape) | **out** (§8 anti-checklist; regenerated post-cutover) |
 | `~/.scns/memory/vault.db` (+ `-shm`, `-wal`) | SCNS broker SQLite | n/a | **out** — consuming `vault.db` would require either a SCNS schema dependency (§0.3 #1 violation) or a side-channel translator that is effectively a shim. Surfaced in §10. |
 | `~/.scns/memory/.taxonomy.yml`, `regression-test*`, `lessons.db` | SCNS internal config / test artifacts | n/a | **out** |
 | `~/.scns/{config,secrets,state,browser-runs,logs,automations,suggestions}` | SCNS runtime / ops surfaces | n/a | **out** (not memory corpus) |
+
+Note on weekly/monthly classification: machine-summarized weekly/monthly pages are treated as **authored** at the migration boundary because Lethe regenerates its own S4b from S1 post-cutover (composition §2 row S4b; §3.1 phase 14) — so importing them as authored S4a does not create a derived/canonical conflict.
 
 ### §1.2 Volume sketch
 
@@ -192,6 +194,20 @@ episode_id =
 
 Same RFC 9562 layout as api §1.4's `recall_id` (48 + 4 + 12 + 2 + 62 = 128 bits) and as the idempotency-key above; the only differences are the discriminant string (`"epi"` vs `"idem"`) and the timestamp source (SCNS-side observation time, not request-arrival). The 74 deterministic bits make the value RFC-conformant *and* fully reproducible from manifest inputs, which is what makes Phase-gate B (§3.1 step 7) a useful equality check.
 
+**Forget-key** (per §3.1 phase 8; §2.1 row 8 + 9-tail) — for `forget(invalidate)` calls in the archive / invalidation phase, the per-row idempotency-key is a *second* uuidv7 derived over the originating `scns_observation_id` with discriminant `"forget"`; same RFC 9562 layout as above:
+
+```
+forget_key =
+  uuidv7-formatted (RFC 9562):
+    bits   0..47   (48-bit ms timestamp prefix) = ts_recorded_scns in unix-ms
+    bits  48..51   (4-bit version)              = 0b0111
+    bits  52..63   (12-bit rand_a tail)         = leading 12 bits of sha256(tenant_id ‖ "forget" ‖ scns_observation_id)
+    bits  64..65   (2-bit variant)              = 0b10
+    bits  66..127  (62-bit rand_b)              = next 62 bits of sha256(tenant_id ‖ "forget" ‖ scns_observation_id)
+```
+
+The `"forget"` discriminant separates the invalidation-call key from the original `remember`-call idempotency-key (`"idem"`) and from the episode-id (`"epi"`) over the same source bytes, so all three derivations are closed and collision-disjoint by construction.
+
 `agent_id` (api §1.5): the SCNS session-hook actor where the source carries one (sessions / daily blocks); else the operator running the migration. `derived_from` is unused — that field is the gap-10 §3.3 peer-message slot and migration is not a peer-message context.
 
 ---
@@ -204,8 +220,8 @@ Ordered, resumable, idempotent. Three hard phase-gates: **A** (pre-flight integr
 
 | # | Phase | Inputs | Output | Idempotency mechanism | Exit gate | S5 entry |
 |---|---|---|---|---|---|---|
-| 1 | **Pre-flight** | tenant id, operator principal, snapshot path | run id; manifest skeleton | run-id is uuidv7; re-running with same run-id resumes | `health()` nominal; principal holds required capabilities | `migration_run_started{run_id, tenant_id, snapshot_hash}` |
-| 2 | **Snapshot** | live SCNS tree | content-addressed snapshot (operator copies / git-tags) | snapshot is read-only by construction | snapshot_hash recorded in S5 | (covered by Phase 1 S5 entry) |
+| 1 | **Pre-flight** | tenant id, operator principal, snapshot path | run id; manifest skeleton | run-id is uuidv7; re-running with same run-id resumes | `health()` nominal; principal holds required capabilities | `migration_run_started{run_id, tenant_id}` |
+| 2 | **Snapshot** | live SCNS tree | content-addressed snapshot (operator copies / git-tags) | snapshot is read-only by construction | snapshot_hash recorded in S5 | `migration_snapshot_recorded{run_id, snapshot_hash}` |
 | 3 | **Inventory** | snapshot | manifest rows (one per row of §2.1 mapping) | manifest stored with run-id; rerun reads existing manifest | every source file maps to ≥1 manifest row or an explicit `out_of_scope` row (§1.1) | `migration_inventory_complete{run_id, row_count, out_of_scope_count}` |
 | 4 | **Phase-gate A** | tenant state | `lethe-audit lint --integrity` report | n/a (read-only) | `--integrity` converges; gap-08 §3.5 | `migration_phase_gate{gate:"A", status:"pass"}` |
 | 5 | **Authored synthesis import (S4a)** | manifest rows §2.1 #1–#5, #9 (without invalidation tail) | S4a pages | per-row `idempotency_key` (api §1.2); file-system atomic-rename on the S4a side (composition §5 row S4a) | every authored row has `status=done` or `status=escalated` | per-row `migration_row_applied` entries |
@@ -226,7 +242,7 @@ Phase-gate failures halt the run; resumes pick up from the failed phase (§3.2).
 - The manifest (§3.1 phase 3) is the run's source of truth. Each row carries `status ∈ {pending, in_flight, done, failed, escalated, orphan_logged}` and (after first success) the `applied_episode_id` returned by the runtime.
 - Per-row `idempotency_key` makes every `remember` / `forget` re-runnable within the api §1.2 24 h TTL window — replays return 200 with the original response (api §1.2; gap-08 §3.1).
 - For runs that exceed 24 h, the manifest's recorded `applied_episode_id` is the resume key: on retry, migration first issues `audit(provenance.source_uri="scns:<shape>:<scns_observation_id>")` and skips the row if a hit is returned. This avoids the api §1.2 "fresh call" path that would duplicate after TTL expiry.
-- A pre-flight check in Phase 1 validates that no `applied_episode_id` from a prior run conflicts with the §2.3 formula re-derived from current manifest inputs — a mismatch indicates either a tenant-id change or a source-id formula bug; the run halts before any writes (Phase-gate B logic, run pre-flight).
+- A pre-flight check in Phase 1 (resume runs only) re-derives §2.3 over the prior manifest's rows and halts on mismatch — a mismatch indicates either a tenant-id change or a source-id formula bug, and the run halts before any writes (Phase-gate B logic, run pre-flight). On fresh runs no prior `applied_episode_id` exists and the check is a no-op.
 
 ### §3.3 Section-split rule for `~/.claude/CLAUDE.md`
 
@@ -339,6 +355,8 @@ The S5 entries `migration_phase_gate{gate:"A"|"B"|"C", status:"pass"}` are the p
 ### §6.2 Provenance round-trip
 
 For every imported episode (or a sampled subset, e.g., 5%):
+
+The 5% sample-rate is intentionally larger than Phase-gate B's ≥1% (§3.1 step 7) because the round-trip below exercises three independent checks (steps 3–5: `audit()` lookup by `source_uri`, `episode_id` equality, and snapshot `content_hash` equality), whereas Phase-gate B verifies only the §2.3 episode-id derivation in isolation.
 
 1. Read the manifest row's `source_path` and `scns_observation_id`.
 2. Compute `expected_source_uri = "scns:<shape>:<scns_observation_id>"` (with optional query-string from §1.3).
