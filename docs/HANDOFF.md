@@ -631,3 +631,25 @@ Read in this order:
 - **`escalate`-class human-review pipeline.** API §3.1 returns 422 with `staged_for_review` ack but does not specify the review workflow (who reviews, on what cadence, how the staged episode lands as durable on accept). Owner: WS8 / project ops.
 
 WS6 is closed. The next QA pass should ask: **"Does WS6 give a WS7 (migration) author and a WS8 (deployment) author enough API-surface substrate to start without re-doing API-contract research?"** §12.4 (WS6-QA reading order) and §12.5 (WS7 reading order) are the explicit answers.
+
+---
+
+## §13 Post-WS6 framing correction — markdown audience
+
+Single-commit docs correction to `docs/03-composition-design.md`. Earlier drafts framed markdown as "for humans only" in four places (§3.1 L77, §5 consistency table S4b row, §7 failure-mode table S4b-diverged row, §8.3 Candidate C ingest tradeoff). This was wrong on principle and internally inconsistent with the design itself, which has `recall_synthesis` (§3.2) returning S4a markdown to LLM agents.
+
+**Corrected principle:** markdown is a **dual-audience** surface. LLMs parse markdown natively — that is *why* markdown is the right substrate for synthesis pages. The real design constraints are:
+
+1. **Canonicality.** S1 is source of truth; the API does not read S4b back because doing so would either duplicate S1 (bloat) or surface stale views (correctness).
+2. **Context bloat.** `recall_synthesis` is the gated entry-point limiting agent exposure to relevant S4a pages.
+3. **Authored vs derived.** S4a authored / S4b derived. The dividing line is *who wrote it*, not *who reads it*.
+
+**Edits landed:**
+- New §1.1 sidebar ("Markdown audience and the real constraint") making the dual-audience principle explicit.
+- §3.1 L77, §5 S4b row, §7 S4b-diverged row, §8.3 ingest tradeoff — all rewritten in canonicality + bloat terms.
+- §2.1 already partitioned S4a/S4b by *authored vs derived* (not by audience); no edits needed there.
+- Charter quote at §8.2 ("markdown remains the human-readable surface for trackpad and synthesized knowledge pages") left intact — "human-readable surface" is a *property*, not an *exclusion*; the bad framing was the inferred "*only*", not the charter text itself.
+
+**Cascade:** WS4 / WS5 / WS6 docs already audited clean for the bad framing — zero hits. No downstream edits required.
+
+**For WS7-QA (fresh-eyes context):** when you read §3.1 / §5 / §7 / §8.3 of the composition design, the language is now consistent with `recall_synthesis` returning markdown to agents. If you find any residual "for humans only" framing in WS7 artifacts, flag it — it would be a regression of this correction.
