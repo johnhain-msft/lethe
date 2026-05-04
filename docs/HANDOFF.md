@@ -520,3 +520,114 @@ Read in this order:
 - **v2 entry-criteria gate.** v2 unblocks at ≥20% strict-stratum operator share **and** ≥10k labeled `(recall, outcome)` pairs (§8.6). Tracking owner: WS8 (deployment / cadence).
 
 WS5 is closed. The next QA pass should ask: **"Does WS5 give a WS6 (API) author and a WS7 (migration) author enough scoring substrate to start without re-doing scoring research?"** §11.4 (WS5-QA reading order) and §11.5 (WS6 reading order) are the explicit answers.
+
+## §12 Post-WS6 update — canonical API surface shipped
+
+### 12.1 What WS6 produced
+
+`docs/06-api-design.md` (1060 lines, single commit). Scope:
+
+- **§0 Frame** — what WS6 owns (verb set, schemas, error taxonomy, idempotency + CAS, recall_id derivation, provenance envelope, emit-points, multi-tenant invariants, opt-in capture verb), what it does NOT own (transport, wire format, auth scheme, RBAC, deployment shape, scoring math, eval cases, retention internals — those are WS5/WS7/WS8). Eight binding constraints from HANDOFF §10 + §11.5 enumerated.
+- **§1 Cross-cutting contracts** — tenant/auth surface boundary; idempotency-key contract (24 h TTL, replay→200, conflict→409, mandatory on every write); version-CAS contract (409 + retry hint, idempotency-replay precedence); deterministic `recall_id` derivation (uuidv7 keyed on `tenant_id + ts_recorded + query_hash`, sha256-derived suffix bits for full reproducibility); provenance envelope shape (two-step for peer-message materialization); error taxonomy (200 ok / 200 idempotency_replay / 400 / 401 / 403 forbidden + forget_denied / 404 / 409 version_conflict + idempotency_conflict / 410 purged / 412 precondition_failed / 422 classifier_escalate / 429 / 5xx); emit-point taxonomy summary; multi-tenant invariants (cross-tenant reads → 404, not "empty"; auth missing → 403).
+- **§2 Read verbs** — `recall(query, intent?, k?, scope?, budget_tokens?)` with full algorithm (bi-temporal filter pre-RRF; classify; weight-tuple; parallel retrieve; RRF; rerank; truncate; provenance enforcement; ledger write; preferences prepend; emit `recall` × top-k); `recall(k=0)` shape (preferences-only with recall_id, zero recall events); `recall_synthesis(uri | query)` distinct from fact path, emits `recall` with `path=synthesis` marker; `peer_message_pull(recipient_scope, mark_read?, max?)`; `peer_message_status(msg_id)`.
+- **§3 Write verbs** — `remember(content, intent?, idempotency_key, provenance, kind?)` with full envelope response (a) including `classified_intent`, `retention_class`, `accepted`, `escalated`, `ack`, `next_consolidate_at`; six `consolidate_phase` emit-points around the post-remember async chain (extract → score → promote → demote → consolidate → invalidate); `promote(fact_id, reason?, idempotency_key, expected_version)` with response `{flag_id, expected_version_consumed, applies_at_next_consolidate, ack="intended_not_applied"}`; `forget(target, mode, reason, idempotency_key, expected_version)` with gap-11 canonical modes (`invalidate|quarantine|purge`) and accepted aliases (`soft→invalidate, deny→quarantine`), purge synchronous with retention-proof-before-delete, quarantine returns estimated `cascade_count`; `peer_message(recipient_scope, type, payload, idempotency_key, ttl?, requires_ack?, in_reply_to?)` synchronous with async pull-based delivery.
+- **§4 Operator / admin verbs** — `capture_opt_in_trace(scope, action ∈ {enable, revoke}, idempotency_key)` admin verb (idempotent, per-tenant, revocation triggers retirement of previously-ingested cases); `emit_score_event(event)` documented as **internal sink** in `scripts/eval/metrics/emitter.py` per scoring §8.4 (NOT an external verb, per decision #7); `consolidate(force?, scope?)` admin trigger; `health()` and `audit(query)` operational reads.
+- **§5 Emit-point matrix** — authoritative per-verb table; replayability invariant restated.
+- **§6 Traceability matrix** — every verb mapped to (composition §, gap §, scoring §); no TBD rows.
+- **§7 Verification audits** — three audits transcribed in-doc: (1) SCNS-independence grep audit (mirrors scoring §7); (2) idempotency-key coverage audit (5/5 write verbs PASS); (3) emit-point coverage audit (7/7 event types PASS).
+- **§8 Anti-checklist** — explicit denials of transport/wire/auth/RBAC/deployment commitments and SCNS coupling/shim/verb mirroring.
+
+### 12.2 Commits on `main`
+
+- (this commit) — `docs(ws6): canonical API surface (verbs, schemas, error taxonomy, emit-points)`.
+
+### 12.3 Architectural notes
+
+**No new architectural corrections.** The §10 binding constraint (Lethe stands on its own; no SCNS data source, no SCNS substrate, no SCNS shim) is reaffirmed at the API surface:
+
+- The §7.1 grep audit confirms zero verb signatures, zero schema fields, and zero data sources reference SCNS. All 14 `scns`/`SCNS` mentions in `docs/06-api-design.md` are disclaimer or boundary clauses (§0.3 binding constraint #1 restatement, §4.1 `capture_opt_in_trace` boundary clause, §7.1 audit transcript, §8 anti-checklist denial).
+- `capture_opt_in_trace` ingests **only Lethe's own trace store**, gated by per-tenant opt-in. SCNS `session_store` is explicitly excluded.
+- The verb surface has no SCNS-mirroring shapes; `remember`, `recall`, `forget` shapes follow gap-brief decisions independent of any prior system.
+
+**Forward-spec on `metrics/emitter.py`.** WS5 §8.4 named `emit_score_event(event)` as a v2 signal-sink extension. WS6 commits to it as an **internal sink** (decision #7), not an external verb. The contract surface from scoring §8.2 (envelope), §8.4 (sink contract), §8.5 (privacy invariants) is restated in API §4.2 with the verb→sink wiring made explicit. WS6 owns the implementation alongside the `capture_opt_in_trace` external verb.
+
+**Decisions locked in WS6** (each documented in API design, traceable in plan-mode dialogue):
+
+1. `forget` mode vocabulary — gap-11 canonical (`invalidate|quarantine|purge`); HANDOFF §8.3 wording (`soft|deny`) accepted as aliases (§3.3 alias table).
+2. `remember()` returns the **full envelope** (`episode_id, idempotency_key, classified_intent, retention_class, accepted, escalated, ack, next_consolidate_at`) — synchronous classifier per gap-12 §6, async extraction.
+3. `peer_message_*` are **synchronous request/response verbs** with **asynchronous pull-based delivery** per gap-10 §3.4–§3.5.
+4. `recall(k=0)` is legal: preferences-only response with `recall_id`, zero `recall` events emitted.
+5. `recall_synthesis` emits standard `recall` events with `path=synthesis` marker; `fact_ids` set to S4a page-ids (uuidv7-hashed stable URIs).
+6. `capture_opt_in_trace` is admin-class, idempotent, per-tenant, revocable; revocation queues retirement of previously-ingested cases per eval-plan §4.6 step 1.
+7. `emit_score_event` is **internal sink**, not external verb; documented in §4.2 for unambiguous verb→sink wiring.
+8. `forget(quarantine)` response includes estimated `cascade_count`; final value visible via `audit()` after async cascade.
+9. `promote` and `forget` synchronous bodies return `{flag_id, expected_version_consumed, applies_at_next_consolidate, ack="intended_not_applied"}` — explicit "intended-not-applied" ack so callers don't assume immediate visibility.
+
+### 12.4 Reading order for **WS6-QA** (fresh-eyes pass)
+
+The WS6-QA author should approach this cold and answer one question: **does this give a WS7 (migration) author enough verb-surface substrate to plan an in-place SCNS-data → Lethe-store migration without re-researching API contracts?**
+
+Read in this order:
+
+1. `docs/06-api-design.md` start to finish. Pay particular attention to §1 (cross-cutting contracts — verify idempotency-key, version-CAS, recall_id derivation, provenance envelope, error taxonomy are all internally consistent and consistent with gap-04/gap-05/gap-08), §2.1 + §2.1.1 (verify bi-temporal filter is **pre-retriever** and that `k=0` shape is sound), §3.1 (verify the six `consolidate_phase` emit-points are named in the right order: extract → score → promote → demote → consolidate → invalidate), §3.3 (verify gap-11 canonical mode vocabulary is the wire-side primary, with `soft|deny` accepted as aliases), §4.2 (verify `emit_score_event` is an internal sink, not an external verb), §5 (verify emit-point matrix is consistent with §3.1 and scoring §8.1), §6 (verify traceability has no TBD rows), §7 (verify the three audits all pass — re-run the grep audit fresh).
+2. `docs/05-scoring-design.md` §8 cross-checked against `docs/06-api-design.md` §1.4 (recall_id derivation), §1.7 (event taxonomy summary), §3.1 (six `consolidate_phase` phases), §4.2 (`emit_score_event` sink). Are the §8.1 event types each emitted by ≥1 verb? Is the `recall_id` derivation sufficient for the §8.3 replay invariant?
+3. `docs/03-composition-design.md` §3 + §4 + §5 + §7 cross-checked against §2 + §3 of `docs/06-api-design.md`. Are the read paths in §3 reflected in `recall` / `recall_synthesis` / `peer_message_pull`? Are the write paths in §4 reflected in `remember` / `promote` / `forget` / `peer_message`? Are the consistency-model rows in §5 reflected in the error taxonomy (T1/T2 ACID → 5xx on store outage)? Are the failure-modes in §7 reflected in `health()` degraded-mode signaling?
+4. `docs/03-gaps/gap-04-multi-agent-concurrency.md` §4 cross-checked against §1.3 (version-CAS) and the per-verb `expected_version` parameter on `promote` / `forget` / `peer_message` (when targeting a specific msg). Is the 409 retry semantics consistent?
+5. `docs/03-gaps/gap-08-crash-safety.md` §3 cross-checked against §1.2 (idempotency-key contract). Is the 24 h TTL consistent? Is the §3.6 retention-proof-before-delete ordering consistent with `forget(purge)` synchronous semantics in §3.3?
+6. `docs/03-gaps/gap-10-peer-messaging.md` §3 cross-checked against §2.3 + §2.4 + §3.4. Are the four message types (`query|info|claim|handoff`) all on the wire? Is the inbox cap (100 unread, oldest non-`query` dropped) surfaced via `cap_dropped_since_last_pull`? Is the sensitive-class send-time scan (gap-10 §6 / gap-11 §3.3) implemented via `422 classifier_escalate`?
+7. `docs/03-gaps/gap-11-forgetting-as-safety.md` §3 cross-checked against §3.3 of `docs/06-api-design.md`. Are all three modes implemented? Is the alias mapping (`soft→invalidate, deny→quarantine`) explicit? Is purge admin-only-by-default and rate-limited? Does the retention proof land in S5 *before* the delete commits?
+8. `docs/03-gaps/gap-12-intent-classifier.md` §3 + §6 cross-checked against §3.1 (remember classifier branches). Are all 7 classes accounted for in the branching (`drop`, `reply_only`, `peer_route`, `escalate`, plus the three persistent `remember:*` paths)? Is caller-tagged intent honored unless classifier objects ≥0.8?
+9. `docs/03-gaps/gap-09-non-factual-memory.md` §6 cross-checked against §2.1 (preferences prepend). Is the 10 KB cap unconditional? Is `preferences_truncated` exposed? Are preferences a separate field from `facts[]` in the response (so callers cannot conflate)?
+10. `docs/03-gaps/gap-05-provenance-enforcement.md` §3 cross-checked against §1.5 (provenance envelope) and the per-fact `provenance` field in `recall` response. Is `episode_id` non-null on every returned fact? Is `derived_from` set for peer-materialized facts? Is `provenance_dropped` surfaced in `applied_filters`?
+11. `docs/04-eval-plan.md` §4.6 cross-checked against §4.1 (`capture_opt_in_trace`). Are all seven pipeline steps (opt-in capture / signal selection / sensitivity classification / scrub / review / signal-loss check / audit log) reachable from this verb's contract? Is revocation-triggered retirement honored?
+12. `docs/HANDOFF.md` §10 + §11.5 binding constraints cross-checked against §0.3 of `docs/06-api-design.md`. Run `grep -in scns docs/06-api-design.md` and confirm every hit is a disclaimer or boundary clause. Same audit pattern as WS4-QA §10.4 and WS5-QA §11.4.
+
+**Anti-checklist (things that should NOT be present):**
+
+- Any verb whose request schema names SCNS, `~/.scns/`, `session_store`, or any foreign-system data source.
+- Any verb whose response schema mirrors a SCNS verb's response shape for compatibility.
+- A `remember` path that bypasses the gap-12 classifier or accepts caller-tagged intent without the ≥0.8 classifier-audit gate.
+- A `recall` path that runs any retriever **before** the §4.1 bi-temporal filter, or that conditionally skips the filter on small stores.
+- A preferences-prepend implementation that gates inclusion on score (the cap is ordering, not gating).
+- A write verb without a mandatory `idempotency_key`.
+- A mutating verb without an `expected_version` parameter (other than `remember`, which creates new rather than mutating).
+- A `forget(purge)` path that deletes content before writing the retention proof to S5 (gap-08 §3.6 ordering).
+- A `recall_id` derivation that uses a non-deterministic CSPRNG suffix (would break the §8.3 replay invariant).
+- An external `emit_score_event` verb (it must be an internal sink per decision #7).
+- A transport/RPC commitment, wire-format commitment, auth-scheme commitment, RBAC role table, or deployment-shape commitment (those are WS8).
+
+A QA failure on any anti-checklist item is a P0; a QA failure on a missing or weak cross-ref is a P1.
+
+### 12.5 Reading order for **WS7** (migration author)
+
+WS7 inherits from WS6 the canonical verb surface as the **migration target**. WS7 plans how SCNS data lands in Lethe stores by *calling these verbs*, not by introducing a SCNS-shaped shim into the verb surface.
+
+Read in this order:
+
+1. `docs/06-api-design.md` §0.2 + §0.3 — what WS6 does NOT own (auth, transport, deployment) and the binding constraints (no SCNS shim; `capture_opt_in_trace` is the only opt-in verb).
+2. `docs/06-api-design.md` §3.1 (`remember`) — every migrated SCNS observation lands as a `remember` call. Idempotency-key + provenance are mandatory; SCNS migration must mint stable idempotency keys (e.g., `uuidv7(tenant_id, scns_observation_id)`) so partial migration runs are restartable.
+3. `docs/06-api-design.md` §3.3 (`forget`) — SCNS archive-store entries map to `forget(invalidate)` per gap-11 §8 / WS7 mapping; SCNS has no analog of quarantine or purge, so those modes are not exercised by migration.
+4. `docs/06-api-design.md` §1.4 (`recall_id` derivation) + §1.5 (provenance envelope) — episode-id stability is a migration invariant (gap-05 §6); migration must preserve SCNS observation-ids as `provenance.source_uri` so audits can trace pre-migration evidence.
+5. `docs/03-composition-design.md` §5 (consistency model) + §7 (failure modes) — what an in-place migration must preserve (T1/T2 ACID windows; degraded-mode handling).
+6. `docs/03-gaps/gap-08-crash-safety.md` §3.5 — `lethe-audit lint --integrity` is a phase-gate in WS7.
+7. `docs/03-gaps/gap-09-non-factual-memory.md` §7 — SCNS `~/.claude/CLAUDE.md` → preference S4a pages; SCNS synthesis pages → narrative S4a pages.
+8. `docs/HANDOFF.md` §10 — Lethe stands on its own; migration is a one-way ingest, not an ongoing dependency.
+
+**Binding constraints from WS6:**
+
+- Migration does not introduce SCNS-shaped verbs into the API surface. SCNS data lands by calling the existing verbs.
+- Migration does not bypass `capture_opt_in_trace`; per-tenant opt-in is the only path for trace data into the eval candidate pool.
+- Migration mints stable, deterministic `idempotency_key`s so partial runs are restartable per §1.2.
+- Migration preserves SCNS observation-ids as `provenance.source_uri` so audit trails survive the cutover (gap-05 §6 episode-id stability invariant; the source-uri carries the SCNS-side identifier even though the episode-id is freshly minted).
+
+### 12.6 Open items / follow-throughs WS6 left for downstream
+
+- **`emit_score_event` implementation in `scripts/eval/metrics/emitter.py`.** Contract is set in API §4.2 (mirroring scoring §8.4). Implementation pairs with `capture_opt_in_trace` (the external verb that gates which tenant traces flow into the sink). Owner: WS6 implementation pass (this is a docs-only commit; the code lands in a follow-up).
+- **`capture_opt_in_trace` external verb implementation.** Contract surface is set in API §4.1; the loader-side function is in `scripts/eval/lethe_native/loader.py::capture_opt_in_trace` (already stubbed by WS4). Owner: WS6 implementation pass.
+- **Per-tenant rate-limit values.** API §1.6 + §2.1.2 + §3.4 name *where* limits attach but not the values. Owner: WS8.
+- **Capability-to-role mapping.** API §8 names capabilities (`forget_purge`, `audit_global`, `tenant_admin`) abstractly. Owner: WS8.
+- **Wire-format and transport choice.** API schemas are abstract type-annotated. Owner: WS8.
+- **`recall_synthesis` event split decision.** API §2.2 emits standard `recall` events with `path=synthesis` marker; v2 trainer can split or unify by its own preference (WS5 §8 is silent on this). Owner: v2 scorer / WS5 v1.1 if revisited.
+- **`escalate`-class human-review pipeline.** API §3.1 returns 422 with `staged_for_review` ack but does not specify the review workflow (who reviews, on what cadence, how the staged episode lands as durable on accept). Owner: WS8 / project ops.
+
+WS6 is closed. The next QA pass should ask: **"Does WS6 give a WS7 (migration) author and a WS8 (deployment) author enough API-surface substrate to start without re-doing API-contract research?"** §12.4 (WS6-QA reading order) and §12.5 (WS7 reading order) are the explicit answers.
