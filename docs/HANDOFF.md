@@ -653,3 +653,117 @@ Single-commit docs correction to `docs/03-composition-design.md`. Earlier drafts
 **Cascade:** WS4 / WS5 / WS6 docs already audited clean for the bad framing — zero hits. No downstream edits required.
 
 **For WS7-QA (fresh-eyes context):** when you read §3.1 / §5 / §7 / §8.3 of the composition design, the language is now consistent with `recall_synthesis` returning markdown to agents. If you find any residual "for humans only" framing in WS7 artifacts, flag it — it would be a regression of this correction.
+
+---
+
+## §14 Post-WS7 update — migration plan shipped
+
+### 14.1 What WS7 produced
+
+`docs/07-migration-design.md` (single commit). Scope:
+
+- **§0 Frame** — what WS7 owns (source inventory, mapping rules, phase plan, phase-gates, concurrency contract, failure-recovery, verification, stopping criteria), what it does NOT own (migration-tool source code, transport/wire/auth/RBAC/deployment, verb internals — those are WS8 / WS6 / gap-01). Eight binding constraints from HANDOFF §10 + §11.5 + §12.5 enumerated, plus the §0.4 vocabulary cross-walk that absorbs the kickoff prompt's "three-tier" shorthand into composition's canonical S1–S5.
+- **§1 Source inventory** — read-only audit of `~/.scns/memory/` + `~/.claude/CLAUDE.md`. Top-level shapes table partitions every path glob into in-scope / out-of-scope: in (CLAUDE.md, lessons, negative, sessions, daily, weekly, monthly, archive, .legacy-lessons); out (MEMORY.md/SOUL.md/USER.md as S4b-shape, regenerated post-cutover; vault.db as out-of-scope per api §0.3 #1; SCNS runtime/ops surfaces as not-memory-corpus). Volume sketch and frontmatter conventions.
+- **§2 Mapping rules** — 9-row table mapping every in-scope source shape to a verb call: CLAUDE.md → preference (per-section split); lessons → prohibition / procedure / narrative depending on §3.4 heuristic + frontmatter; negative → prohibition; sessions → episode (state_fact); daily → episode (reference) per timestamped block; weekly/monthly → narrative; archive / .legacy-lessons → `forget(invalidate)` after a corresponding `remember`; `criticStatus=suppress` → `remember` then immediate `forget(invalidate)` to preserve audit trail. Authored-vs-derived rule (composition §2.1 + §8.3 Candidate C) and identifier rules — idempotency-key and episode-id derivations are uuidv7-shaped and parallel to api §1.4: 48-bit ts prefix + fixed 4-bit version + 12-bit deterministic rand_a tail + fixed 2-bit variant + 62-bit deterministic rand_b, with discriminant strings (`"idem"`, `"epi"`) separating the two derivations over the same source bytes.
+- **§3 Phase plan** — 14 ordered phases with three hard phase-gates: A (pre-flight integrity-lint per gap-08 §3.5), B (episode-id round-trip per gap-05 §6), C (post-import provenance + integrity lint per gap-05 §3.5 + gap-08 §3.5). Per-phase: inputs, output, idempotency mechanism, exit gate, S5 entry. Resumability mechanism (manifest as source of truth; per-row idempotency keys; `audit(provenance.source_uri=...)` lookup as TTL-fallback). Section-split rule for CLAUDE.md (one preference page per `##` heading). Procedure-vs-narrative classification heuristic (3-test conjunction; favors narrative on ambiguity). Explicit list of verbs migration does NOT call (`promote`, `peer_message`, `capture_opt_in_trace`, `emit_score_event`).
+- **§4 Concurrency contract** — cold-start case (recommended); warm-tenant case via api §1.3 `expected_version` CAS (gap-04 §3 candidate (a)); recall-determinism preservation (api §1.4 derivation depends only on request inputs, so migration-time writes do not perturb in-flight recall_ids); tenant-scope invariant (api §1.8); per-phase locking via `health()` polling, not direct lock acquisition.
+- **§5 Failure modes & recovery** — per-phase table mapped to composition §7 rows. Escalation handling (`422 classifier_escalate` is a first-class outcome, manifest row marked `escalated`, not a halt). Explicit list of what is NOT a migration failure (heuristic outcome correctable post-cutover, archive orphan logged not halted, suppress-then-invalidate by design).
+- **§6 Verification** — phase-gate outputs in S5; provenance round-trip on a 5% sample (source_uri lookup, episode-id match, content_hash match); recall-determinism probe (~50 queries, drift tolerance, fact-id-set diff); preference-cap honoring (`recall(k=0)` slice ≤10 KB, recency-ordered, `preferences_truncated` flag); anti-checklist verification; **§6.6 four audit transcripts in-doc**: SCNS-independence (80 hits all in allowed categories — corpus refs / `scns:<shape>:<id>` literals / boundary disclaimers / audit transcript / HANDOFF citations); idempotency-key coverage (9/9 mapping-row write paths PASS); phase-gate coverage (14/14 phases gated, 3/3 hard gates present); markdown-audience audit (zero "for humans only" framing).
+- **§7 Stopping criteria** — for one tenant (S5 phase-gate entries; provenance round-trip; recall-determinism within tolerance; preference-cap honored; operator-signed `migration_run_complete`) and for WS7 deliverable (doc + HANDOFF §14 + audits in-doc + §10 residuals).
+- **§8 Anti-checklist** — explicit denials of migration-tool source-code spec, `migrate_*` verb, SCNS shim, vault.db consumption, MEMORY.md copying, capture_opt_in_trace bypass, transport/wire/auth/RBAC/deployment commitments, cross-deployment Lethe→Lethe spec, synchronous fact-extraction of authored synthesis, dream-daemon throughput guarantee.
+- **§9 Traceability matrix** — every WS7 decision mapped to its composition / scoring / api / gap-NN / HANDOFF source.
+- **§10 Residual unknowns** — daily-block source-id collision under multi-snapshot migration (mitigation: include snapshot_hash in source-id formula if collisions observed); §3.4 heuristic accuracy floor (swap to LLM classifier if precision drops below 80%); Phase 9 async-drain volume thresholds; sensitive-content escalation review workflow at scale (HANDOFF §12.6 inheritance); cross-deployment Lethe→Lethe migration deferred; vault.db consumption deferred; operator-tooling UX punted; idempotency-key TTL extension instrumented; Phase 11 S3 backfill duration.
+
+### 14.2 Commits on `main`
+
+- `11e6366` — `docs(ws7): migration design (in-place SCNS corpus → Lethe stores)`.
+- (this commit) — `docs(handoff): WS7 post-update — migration plan shipped`.
+
+### 14.3 Architectural notes
+
+**No new architectural corrections.** The §10 binding constraint (Lethe stands on its own) and the §11.5 / §12.5 derivative bindings (no SCNS shim in the runtime; migration is a one-way ingest that calls api verbs and stops) are reaffirmed at the migration surface:
+
+- The §6.6.1 audit confirms **zero verb signatures, zero schema fields, zero post-cutover read paths** reference SCNS. All 80 `scns`/`SCNS` mentions in `docs/07-migration-design.md` fall into five allowed categories: source-corpus references (the migration target is, by definition, SCNS); `provenance.source_uri = scns:<shape>:<id>` literals (audit-trail format, internal to Lethe's own provenance store after import); HANDOFF §10 / api §0.3 #1 boundary citations; the §8 anti-checklist denial; the §6.6.1 audit itself.
+- After cutover (§3.1 phase 13), the runtime has no SCNS dependency. The migration tool stops; Lethe operates on its own substrate.
+- No `migrate_*` verb is introduced into the api surface. Migration calls only the existing api §2–§4 verbs.
+
+**Forward-spec on the migration tool itself.** This doc is verb-call-shaped; the implementation (CLI, manifest format, snapshot mechanism, S3 backfill orchestration, phase-gate runners) is a follow-up pass. WS7 commits to the **plan**, not the **tool**.
+
+**Identifier-derivation parallelism.** The §2.3 idempotency-key and episode-id derivations are uuidv7-shaped, RFC 9562-conformant, and visually parallel to api §1.4 — same 48 + 4 + 12 + 2 + 62 bit layout; same sha256-derived deterministic-suffix pattern. Discriminant strings (`"idem"` for the idempotency-key, `"epi"` for the episode-id; `recall_id` in api §1.4 has no discriminant because its inputs already differ) prevent collision-by-construction over the same source bytes.
+
+**Decisions locked in WS7** (each documented in `docs/07-migration-design.md`, traceable in plan-mode dialogue):
+
+1. Five-store vocabulary (composition §2 S1–S5) used throughout; the kickoff prompt's "three-tier" shorthand is absorbed into the §0.4 vocabulary cross-walk.
+2. Corpus-only migration; `vault.db` is out-of-scope for v1 (would require SCNS schema dependency or a side-channel translator that is effectively a shim).
+3. SCNS S4b-shape projections (`MEMORY.md` / `SOUL.md` / `USER.md`) are **not** copied; Lethe regenerates S4b post-cutover from S1.
+4. CLAUDE.md splits per top-level `##` heading into separate preference pages; the 10 KB always-load cap (gap-09 §6) is enforced at recall as an *ordering* constraint, not at migration as a *gating* constraint.
+5. Authored synthesis migrates with `lethe.extract: false` (composition §8.3 Candidate C); operator opts in per-page if desired post-cutover.
+6. Idempotency-key = `uuidv7(tenant_id, scns_observation_id)` with discriminant `"idem"`, RFC 9562 layout per §2.3 — independent of `ts_recorded` so cross-day resumes still replay.
+7. Episode-id = `uuidv7(tenant_id, ts_recorded_scns, scns_observation_id)` with discriminant `"epi"`, RFC 9562 layout per §2.3 — `ts_recorded_scns` is the SCNS-side observation timestamp (not migration host wall-clock), making episode-id deterministic across resumes (gap-05 §6).
+8. Cold-start migration is the recommended v1 path; warm-tenant migration is supported with api §1.3 `expected_version` CAS retry (gap-04 §3 candidate (a)).
+9. `criticStatus=suppress` rows migrate as `remember` then immediate `forget(invalidate)` to preserve the audit trail (gap-05 §3.4); they are not silently dropped.
+10. Phase 11 (S3 backfill) is non-blocking on the api surface (composition §3.1 lexical fallback survives S3 outage); operator chooses wait or defer.
+
+### 14.4 Reading order for **WS7-QA** (fresh-eyes pass)
+
+The WS7-QA author should approach this cold and answer one question: **does this give an operator (or migration-tool implementer) enough substrate to plan and execute an in-place SCNS-corpus → Lethe-tenant migration without re-researching upstream contracts, and does every binding invariant from upstream WS survive intact?**
+
+Read in this order:
+
+1. `docs/07-migration-design.md` start to finish. Pay particular attention to §0.3 (eight binding constraints — verify each cites an upstream §-ref correctly), §0.4 (five-store vocabulary cross-walk — verify it does not contradict composition §2), §2.1 (mapping table — verify every SCNS source shape from §1.1 has an in-scope or out-of-scope row), §2.3 (identifier rules — verify the uuidv7 layout matches api §1.4 and that the idempotency-key/episode-id discriminants prevent collision), §3.1 (14-phase plan — verify the three hard phase-gates are present and gated correctly), §6.6 (four audit transcripts — re-run each fresh).
+2. **`docs/03-composition-design.md` §1.1** — the **dual-audience markdown principle**. Per HANDOFF §13 (cascade record), this is canonical and any "for humans only" framing in WS7 artifacts would be a regression. Verify §6.6.4 of `docs/07-migration-design.md` audits cleanly and that §3.3 (CLAUDE.md split), §2.1 (S4a synthesis pages), and §6.4 (preference-cap verification) all use dual-audience language.
+3. `docs/03-composition-design.md` §2 + §5 + §6 + §7 cross-checked against §0.4 + §3 + §4 + §5 of `docs/07-migration-design.md`. Are the five-store vocabulary uses faithful (no S4b-shape copy; S4a authored vs S4b derived split honored)? Are the T1/T2 ACID windows preserved by the phase plan (Phase 6 = T1 boundary; Phase 8 = T2 boundary)? Is the §6 provenance propagation chain (caller → episode → fact-edge → recall) preserved by the §2.3 `provenance.source_uri` and `episode_id` rules? Are the §7 failure-mode rows mapped onto the §5 per-phase recovery table?
+4. `docs/03-gaps/gap-08-crash-safety.md` §3.5 cross-checked against §3.1 phases 4 and 10 of `docs/07-migration-design.md`. Is `lethe-audit lint --integrity` invoked as a hard gate at both pre-flight (Phase-gate A) and post-import (Phase-gate C)? Are the §6.6.3 phase-gate audit transcript's hard-gate counts (3/3) correct?
+5. `docs/03-gaps/gap-05-provenance-enforcement.md` §3 + §6 cross-checked against §2.3 + §3.1 phase 7 of `docs/07-migration-design.md`. Is episode-id stability enforced by Phase-gate B's sample round-trip? Does every imported episode carry a non-null `episode_id` and a `provenance.source_uri` of the `scns:<shape>:<id>` form? Are the post-import lints (`provenance-required`, `provenance-resolvable`, `forget-proof-resolves`) all run at Phase-gate C?
+6. `docs/03-gaps/gap-09-non-factual-memory.md` §3 + §6 + §7 cross-checked against §2.1 + §3.3 + §3.4 of `docs/07-migration-design.md`. Are the four persistent shapes (preference, prohibition, procedure, narrative) all present in the mapping table? Is the SCNS `~/.claude/CLAUDE.md` → preference and SCNS synthesis pages → narrative pages mapping (gap-09 §7) faithful? Is the 10 KB always-load cap (gap-09 §6) honored as an ordering constraint at recall, not a gating constraint at migration?
+7. `docs/03-gaps/gap-04-multi-agent-concurrency.md` §3 + §4 + §6 cross-checked against §4 of `docs/07-migration-design.md`. Is the warm-tenant CAS-retry path (candidate (a)) faithful? Is the cold-start case (candidate (b)) named as the recommended v1 path? Is the per-tenant lock interaction (via `health()` polling, not direct acquisition) consistent with composition §4.4?
+8. `docs/03-gaps/gap-11-forgetting-as-safety.md` §3 cross-checked against §2.1 + §3.1 phase 8 of `docs/07-migration-design.md`. Are archive entries mapped to `forget(invalidate)` (not `quarantine` or `purge`)? Is the `criticStatus=suppress` → `remember` then `forget(invalidate)` design (preserving audit trail) consistent with gap-05 §3.4?
+9. `docs/06-api-design.md` §1.2 + §1.3 + §1.4 + §1.5 + §3.1 + §3.3 + §4.1 cross-checked against §0.3 + §2.3 + §3.1 + §3.5 of `docs/07-migration-design.md`. Is every migration write a valid `remember` / `forget` call (all required fields present)? Is the idempotency-key TTL (24 h) handled correctly with the `audit(provenance.source_uri=...)` fallback for >24 h runs? Does the migration explicitly NOT call `capture_opt_in_trace` (per HANDOFF §12.5 binding)?
+10. `docs/04-eval-plan.md` §4.6 cross-checked against §3.5 + §8 of `docs/07-migration-design.md`. Is `capture_opt_in_trace` correctly excluded from the migration path? If the operator wants to opt the destination tenant into eval-trace ingest, is that documented as a separate, post-cutover api §4.1 call?
+11. `docs/HANDOFF.md` §10 + §11.5 + §12.5 binding constraints cross-checked against §0.3 + §6.6.1 of `docs/07-migration-design.md`. Run `grep -in scns docs/07-migration-design.md` and confirm every hit falls into the five allowed categories (source-corpus reference / `scns:<shape>:<id>` literal / boundary citation / anti-checklist denial / audit transcript itself). Same audit pattern as WS4-QA §10.4, WS5-QA §11.4, WS6-QA §12.4.
+
+**Anti-checklist (things that should NOT be present):**
+
+- Any verb signature in `docs/07-migration-design.md` that names `migrate_*` or extends the api surface.
+- Any post-cutover read path from the runtime to `~/.scns/` or `vault.db`.
+- A migration row that writes without `idempotency_key` or without `provenance.source_uri`.
+- An idempotency-key or episode-id derivation that uses a non-deterministic CSPRNG suffix (would break Phase-gate B).
+- An idempotency-key derivation that omits the discriminant separator (`"idem"`) and would collide with the episode-id derivation over the same source bytes.
+- A phase that lacks both an exit gate and a justified "no gate" notation.
+- A pre-flight Phase-gate A or post-import Phase-gate C that is not a *hard* halt.
+- An "S4b copy from SCNS" path (regeneration must be from S1 post-cutover, per composition §2 row S4b).
+- A migration call to `capture_opt_in_trace` (per HANDOFF §12.5; eval-trace ingest is post-cutover, separate, opt-in).
+- A migration call to `promote`, `peer_message`, or `emit_score_event` (none are appropriate to the migration path).
+- Any "for humans only" framing for markdown surfaces (HANDOFF §13 cascade; composition §1.1 binding).
+- A transport / wire / auth / RBAC / deployment-shape commitment (those are WS8).
+
+A QA failure on any anti-checklist item is a P0; a QA failure on a missing or weak cross-ref is a P1.
+
+### 14.5 Reading order for **WS8** (deployment author)
+
+WS8 inherits the operator-knob surface and the deployment-shape decisions WS7 deferred. Read in this order:
+
+1. `docs/07-migration-design.md` §3 — the 14-phase plan names every operator action point (snapshot creation, capability checks, manifest inspection, phase-gate halts, drift-tolerance configuration, cutover trigger, S4b regeneration wait). WS8 builds the operator UX around these.
+2. `docs/07-migration-design.md` §4 — the cold-start vs. warm-tenant decision is operator-configured per migration; WS8 owns whether `single_writer_per_tenant=true` (gap-04 §4 stop-gap) is the default for migrations.
+3. `docs/07-migration-design.md` §10 — residual unknowns name several instrumentation hooks WS8 should expose: idempotency-key TTL extension instrumentation; Phase 9 async-drain operator alarm (`time-since-last-successful-consolidation > N × gate_interval`); Phase 11 S3 backfill progress via `health()`; manifest UX (CLI / JSON / HTML).
+4. `docs/03-composition-design.md` §7 — degraded modes are deploy-cadence aware. WS8 sets the actual gate intervals and lock heartbeats.
+5. `docs/03-gaps/gap-01-retention-engine.md` §3.2 — dream-daemon scheduler config (gate interval, lock heartbeat); migration's Phase 9 async-drain timing depends on these values.
+6. `docs/03-gaps/gap-08-crash-safety.md` §3.4 + §3.5 — startup integrity check + lock recovery; WS8 owns the operator-facing `lethe-audit lint --integrity` invocation surface that migration's Phase-gates A and C call.
+7. `docs/03-gaps/gap-14-eval-set-bias.md` §5(3) — drift detector + monthly re-eval cadence; migration's §6.3 recall-determinism probe is a one-shot version of the same idea.
+8. `docs/06-api-design.md` §0.2 + §1.6 — the rate-limit numerical caps, capability-to-role mapping, and wire-format choice are all WS6-deferred and WS8-owned; migration's §3.1 Phase 1 capability check depends on the WS8 capability mapping.
+9. `docs/HANDOFF.md` §12.6 — the `escalate`-class human-review pipeline is HANDOFF §12.6 deferred; migration's §5.1 marks rows `escalated` but the review workflow is WS8 / project-ops territory.
+
+### 14.6 Open items / follow-throughs WS7 left for downstream
+
+- **Migration-tool implementation.** The doc is verb-call-shaped; CLI, manifest format, snapshot mechanism, S3 backfill orchestration, phase-gate runners, and operator UX are an implementation pass. Owner: operator-tooling pass (post-WS8).
+- **Daily-block source-id collision under multi-snapshot migration** (§10). If observed, augment source-id formula with `@<snapshot_hash[:8]>`. Owner: operator-tooling pass (instrumented at first multi-snapshot run).
+- **§3.4 procedure-vs-narrative heuristic accuracy floor** (§10). Swap to LLM classifier if precision drops below 80% on a labeled sample. Owner: operator-tooling pass (instrumented post-cutover via `forget` + `remember` re-import frequency).
+- **Phase 9 async-drain operator alarm threshold** (§10). Bounded by dream-daemon gate cadence × episode count; WS8 sets the alarm threshold value.
+- **Cross-deployment Lethe→Lethe migration spec** (§10). Same shape as SCNS→Lethe with `provenance.source_uri = lethe:<src_tenant>:<episode_id>`; deferred to v1.x. Owner: future migration spec.
+- **`vault.db` consumption** (§10). Out of scope for v1; if a future operator policy requires SCNS broker metadata in Lethe, the path is a one-time exporter that emits SCNS-corpus-shaped markdown for migration to consume — keeping the §0.3 #1 boundary intact. Owner: future migration spec or v1.x if demanded.
+- **Idempotency-key TTL extension** (§10). api §1.2 sets 24 h; gap-08 §5 names it as a guess. For very large corpora exceeding 24 h to drain, §3.2 falls back to `audit(provenance.source_uri=...)` lookup; instrument the fallback rate. Owner: WS8 (operational metric) + WS6 implementation (TTL config).
+- **Phase 11 S3 backfill duration & progress** (§10). Volume-sensitive; non-blocking but operator-visible. WS8 may want to expose progress via `health()`. Owner: WS8.
+- **Sensitive-content escalation review workflow** (§5.1; HANDOFF §12.6 inheritance). Migration marks rows `escalated`; the post-migration review workflow is WS8 / project ops. Owner: WS8.
+- **Manifest UX surface** (§10). CLI / JSON / HTML; punted to operator-tooling pass. Owner: operator-tooling pass.
+
+WS7 is closed. The next QA pass should ask: **"Does WS7 give an operator (and migration-tool implementer) enough substrate to plan and execute an in-place SCNS-corpus → Lethe-tenant migration without re-doing migration research, and does every binding invariant from upstream WS survive intact?"** §14.4 (WS7-QA reading order) and §14.5 (WS8 reading order) are the explicit answers.
