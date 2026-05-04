@@ -135,6 +135,7 @@ Lookup table indexed by `kind` frontmatter (S4a / composition §3.1):
 | `preference` | 0.85 |
 | `user_fact` | 0.70 |
 | `feedback` | 0.55 |
+| `narrative` | 0.50 |
 | `project_fact` | 0.40 |
 | `reference` | 0.25 |
 | (default — unclassified episodic) | 0.30 |
@@ -258,7 +259,8 @@ Defaults of §3 + §4 unchanged. `τ_r = 30 d`, full additive tuple `(α, β, γ
 
 - **`β = 0`** — narratives are append-mostly; their score should not decay just because nobody asked.
 - **Recall-time path is `recall_synthesis(uri | query)`** (composition §3.2): narratives are summarized at recall, not retrieved as raw rows. Scoring is **page-level** (the whole narrative document), not fact-level.
-- **Type-priority high** (`narrative` is added to the §3.4 table at `0.50` between `feedback` and `project_fact`).
+- **Type-priority high** (`narrative` appears in the §3.4 table at `0.50` between `feedback` and `project_fact`).
+- **`ε` cap = `0.50`** (default, per §3.5; matches §5.5 dispatch row).
 - Recall-time: `narrative_recall` intent → `intent_match = 1.0`. The score governs **which narrative to summarize**, not which fact-rows to surface.
 
 ### §5.5 Dispatch table
@@ -399,7 +401,7 @@ Seven event types, each with one JSON schema:
   "ts_valid":               "RFC3339 (bi-temporal valid time; for recall = query-time, for remember = ingest-time)",
   "model_version":          "semver of the scorer package (v1.x.y)",
   "weights_version":        "hash of the active config (sha256 of the §7 knob table snapshot)",
-  "contamination_protected": true,
+  "contamination_protected": "boolean (mandatory; see §8.5)",
   "fact_ids":               ["S2 fact uuids"],
   "score_inputs":           { "type": float, "recency": float, "connectedness": float,
                               "utility": float, "contradiction": float, "gravity": float },
@@ -490,6 +492,7 @@ Items WS5 commits to *naming* but not closing in v1:
 3. **Preference always-load bandwidth** — the 10 KB cap interacts with S2 read latency at recall-time. May need a streamed top-k preferences path.
 4. **Utility-half-life vs recency-half-life decoupling** — both default `30 d`. They are conceptually independent; v1.1 BO sweep should treat them independently.
 5. **Intent-bonus saturation** — `(1 + 0.15 · intent_match · classifier_conf)` saturates at `1.15`. If classifier confidence becomes systematically high (e.g., post-fine-tune), the bonus may be too small to discriminate. Re-tune w_intent at v1.1.
+6. **Procedure type-priority placeholder** — `type_priority = 0.55` for `procedure` (Appendix A.1) is provisional; treated as `feedback`-tier in v1 pending v1.1 BO sweep over per-class priorities.
 
 ---
 
@@ -528,7 +531,7 @@ Items WS5 commits to *naming* but not closing in v1:
 
 **`f_pref`** (preference; β=0, ε cap 0.30):
 - `type_priority = 0.85`
-- `recency = 0` (β=0 — preferences don't decay)
+- `β · recency = 0` (β=0 — preferences don't decay; recency itself is unused)
 - `connectedness = 0.40` (PPR percentile in fact-graph)
 - `utility = 0.4·8·exp(−11/30) + 0.7·1·exp(−11/30) ≈ (3.2 + 0.7)·0.694 ≈ 2.71`. After 95th-pct min-max normalize (assume 95th-pct ledger value = 4): `≈ 0.68`.
 - `contradiction = 0`, so `−ε_eff·contradiction = 0`.
@@ -547,7 +550,7 @@ Items WS5 commits to *naming* but not closing in v1:
 - **`score(f_fact) = 0.397`**. → **retain**.
 
 **`f_proc`** (procedure; `τ_r = 180`):
-- `type_priority = 0.55` (procedures aren't in §3.4; treat as `feedback` tier in v1; **residual unknown #1**).
+- `type_priority = 0.55` (procedures aren't in §3.4; treat as `feedback` tier in v1; **residual unknown #6**).
 - `recency = 0.05 + 0.95·exp(−61/180) ≈ 0.05 + 0.95·0.713 ≈ 0.73`.
 - `connectedness = 0.30` (procedure-seq graph).
 - `utility = 0.4·1·exp(−61/30) ≈ 0.4·0.130 ≈ 0.052`. Normalize: `≈ 0.013`.
