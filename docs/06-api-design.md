@@ -45,7 +45,7 @@ These are non-negotiable. Every verb spec below is verifiable against them.
 
 1. **No SCNS compatibility shim.** No verb reads from `~/.scns/`, no verb imports from the SCNS repo, no verb-side data source is SCNS. SCNS is a design-pattern reference only (WS1 audit, gap-01) — not a substrate, not a dependency, not a data source. The §7 grep audit confirms this in-doc.
 2. **Bi-temporal validity filter is applied BEFORE any retriever** on the recall path. Score-then-filter is rejected (cost). Skip-filter-on-small-stores is rejected (correctness). See §2.1 and scoring §4.1.
-3. **Preference always-load is unconditional up to 10 KB.** Recall-time scoring orders preferences inside the cap; it does not gate inclusion. See §2.1 and gap-09 §6.
+3. **Preference always-load is unconditional up to 10 KB.** Recall-time scoring orders preferences inside the cap; it does not gate inclusion. This doc adopts **recency-of-revision** as the in-cap ordering (gap-09 §6 does not pin an ordering; §2.1 step 10 is the implementation site).
 4. **Every write verb carries an `idempotency_key`.** Replays inside the 24 h TTL window return the original response with status 200; they do not re-execute the write. See §1.2 and gap-08 §3.1.
 5. **Every mutating verb carries `expected_version`.** Conflicts return 409 with the current version and a retry hint. See §1.3 and gap-04 §4.
 6. **`recall_id` is deterministic** — uuidv7 keyed on `tenant_id + ts_recorded + query_hash`. This is the join key for `recall ↔ recall_outcome` and the replay invariant for emit-point reproducibility. See §1.4 and scoring §8.3.
@@ -106,7 +106,7 @@ The derivation is **deterministic on its three inputs**. This means:
 - The §8.4 emit-pipeline can **reproduce** `recall_id` from logged inputs without round-tripping to the live runtime — this is the replay invariant scoring §8.3 commits to.
 - `recall_outcome` events join back to `recall` events via this id (scoring §8.4).
 
-Implementation note: the uuidv7 timestamp prefix uses `ts_recorded`; the random-suffix bits are derived deterministically from `sha256(tenant_id || query_hash)` rather than from a CSPRNG, so the value is fully reproducible. WS8 picks the exact byte-layout but cannot break determinism.
+Implementation note: the uuidv7 timestamp prefix is the 48-bit `ts_recorded` in milliseconds per RFC 9562. The version (4 bits, `0111`) and variant (2 bits, `10`) fields are fixed by RFC 9562. The remaining 74 bits (`rand_a` ‖ `rand_b`) are filled deterministically from the leading 74 bits of `sha256(tenant_id ‖ query_hash)` rather than from a CSPRNG, so the value is fully reproducible and RFC-conformant. WS8 owns the byte-packing details but cannot alter this derivation.
 
 ### §1.5 Provenance envelope
 
@@ -257,7 +257,7 @@ recall(
 Order is binding. Step 1 runs **before** any retriever (binding §0.3 #2).
 
 1. **Bi-temporal validity filter** (scoring §4.1): exclude any fact where `valid_to ≤ t_now` or `valid_from > t_now` from the candidate set entirely. This is the pre-RRF gate; not a post-score filter.
-2. **Intent classify** (gap-12; synchronous, ≤ 200 ms residual budget). Caller-supplied `intent` is honored unless classifier audit objects at ≥0.8 confidence (gap-12 §6 row 6).
+2. **Intent classify** (gap-12; synchronous, ≤ 200 ms residual budget). Caller-supplied `intent` is honored only if classifier audit confidence is < 0.8 *against* the caller's tag (gap-12 §6 row 6).
 3. **Weight-tuple select** (gap-03; reads tenant scoring config from S2).
 4. **Parallel retrieve**: graph-walk on S1 ∥ vector ANN on S3 ∥ lexical-only on S1 episode text (the lexical fallback survives S3 outage; composition §7).
 5. **RRF combine** (scoring §4.2; `k_rrf = 60`).
@@ -502,7 +502,7 @@ remember(
 4. **Branch on class**:
    - `drop` / `reply_only` → `accepted=false`; **return immediately** with `ack="dropped"`. No S1/S2 write; the idempotency_key is recorded so retries are stable.
    - `escalate` → stage episode in S2 quarantine table; **return** with `ack="staged_for_review"`, status **422 classifier_escalate**.
-   - `peer_route` → caller is hinted to use `peer_message`; episode is NOT written; status **422 invalid_request** with hint `use_peer_message`.
+   - `peer_route` → caller is hinted to use `peer_message`; episode is NOT written; status **400 invalid_request** with hint `use_peer_message`.
    - `remember:fact` / `remember:preference` / `remember:procedure` (or shape-equivalents) → continue.
 5. **Begin transaction T1** (composition §5 row T1; gap-08 §3.1):
    - Insert episode into S1 with `tenant_id`, `agent_id`, `source_uri`, `derived_from?`, `kind`, `content`, `recorded_at`.
@@ -541,7 +541,7 @@ Phases run **in order**; each is checkpointed in S5 (gap-08 §3.3) so a daemon c
 
 **Tenant / auth / rate-limit**
 
-Per-tenant write rate limit (WS8). `escalate`-class writes additionally count against a sensitive-class quota (gap-11 §3.3).
+Per-tenant write rate limit (WS8). `escalate`-class writes additionally count against a sensitive-class quota (gap-10 §6 primary; gap-11 §3.3 auxiliary).
 
 ### §3.2 `promote(fact_id, reason?, idempotency_key, expected_version)`
 
@@ -613,7 +613,7 @@ forget(
   mode:              "invalidate" | "quarantine" | "purge",
   reason:            string,                // mandatory; lands in S5 audit
   idempotency_key:   uuidv7,
-  expected_version:  int                    // version of fact_id (mode=invalidate) or episode_id (mode=quarantine|purge)
+  expected_version:  int                    // version of fact_id (mode=invalidate, or mode=purge with fact_id target) or episode_id (mode=quarantine, or mode=purge with episode_id target)
 ) -> ForgetResponse
 ```
 
@@ -724,7 +724,7 @@ peer_message(
 
 - Synchronous request/response. Verb returns when the message is durably written to S2 inbox table; **delivery is async** — recipient pulls on its own cadence.
 - Cross-tenant: **403 forbidden** (composition §5.2 invariant).
-- Sensitive-class scan at **send time** (gap-10 §6 / gap-11 §3.3): claim payloads are scanned by the sensitive-class taxonomy *before* write. Hits → **422 classifier_escalate** with hint to revise.
+- Sensitive-class scan at **send time** (gap-10 §6 primary; gap-11 §3.3 auxiliary): claim payloads are scanned by the sensitive-class taxonomy *before* write. Hits → **422 classifier_escalate** with hint to revise.
 - Inbox cap (100 unread; gap-04 §5 / gap-10 §3.4): on cap, oldest non-`query` messages are dropped server-side; counter exposed via `peer_message_pull` response.
 
 **Errors**
