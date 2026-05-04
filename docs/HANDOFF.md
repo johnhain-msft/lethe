@@ -435,3 +435,88 @@ Read in this order:
 - **Drift detector (gap-14 §5(3) / eval plan §8).** WS4 specifies the cadence (monthly held-set re-eval; quarterly fresh adversarial slice; annual eval-set version bump). WS8 schedules.
 
 WS4 is closed. The next QA pass should ask: **"Does WS4 give a WS5 (scoring) author and a WS6 (API) author enough substrate to start without re-doing eval-design research?"** §10.4 (QA reading order) and §10.5 (WS5 reading order) are the explicit answers.
+
+## §11 Post-WS5 update — scoring formalism shipped
+
+### 11.1 What WS5 produced
+
+`docs/05-scoring-design.md` (600 lines, single commit). Scope:
+
+- **Two scoring surfaces** formalized with explicit math: consolidate-time additive `score(f) = gravity_mult(f) · [α·type + β·recency + γ·connectedness + δ·utility − ε_eff·contradiction]`; recall-time `rerank(f, q) = rrf(f, q) · (1 + w_intent · intent_match · classifier_conf) + w_utility(t) · utility(f)` after a bi-temporal validity filter. Defaults align with gap-03 §5 candidate (a).
+- **Per-term derivations** carry explicit named formulas, units, value ranges, and lit-review provenance: Cognitive Weave (recency residual + decay), HippoRAG (PPR connectedness with 2-hop subgraph cap and degree-percentile fallback), gap-02 (utility weighted aggregate), MaM (gravity as demotion-floor multiplier — Q1), MAGMA (intent-routed multiplicative bonus — Q2), gap-13 (log-dampened ε for contradiction oscillation control).
+- **Per-class dispatch** exhaustive over the four persistent shapes from gap-09 §3 (episodic-fact, preference, procedure, narrative) — explicit per-class formulas and a dispatch table indexed by `kind` frontmatter and intent (Q3). Non-persistent classifier outputs (`reply_only`, `peer_route`, `drop`, `escalate`) are noted out-of-scope for scoring.
+- **Bi-temporal invalidation semantics** specified end-to-end: recall floor, gravity zeroed, `T_purge=90 d` grace window, utility-tally freeze on invalidate (and replay-on-revalidate), log-dampened ε amplification.
+- **Tuning-knob table** comprehensive: every weight, threshold, and decay constant with default, range, calibration source (LongMemEval / LoCoMo / DMR + Lethe opt-in trace; **no SCNS sources**), eval signal cross-ref to eval-plan §5/§6, and keep/replace/extend trigger.
+- **v2 learned-scorer log-signal contract**: 7 event types (`remember`, `recall`, `recall_outcome`, `promote`, `demote`, `invalidate`, `consolidate_phase`), common JSON envelope, replayability invariant `(log + S1/S2/S3 snapshot at t) → score(t)`, sink contract extending `scripts/eval/metrics/emitter.py` with `emit_score_event(event)` (Q4 — pairs with `lethe_native/loader.py::capture_opt_in_trace`), privacy invariants, two-gate v2 entry criteria (≥20% strict-stratum operator share AND ≥10k labeled `(recall, outcome)` pairs).
+- **Worked numerical example** in Appendix A — preference, episodic fact, procedure (with active contradiction) — through both surfaces.
+
+### 11.2 Commits on `main`
+
+- `e0f0705` — `docs(ws5): scoring formalism (v1 heuristic + v2 log-signal contract)`.
+
+### 11.3 Architectural notes
+
+**No new architectural corrections.** The §10 binding constraint (Lethe stands on its own; no SCNS data source, no SCNS substrate) is reaffirmed:
+
+- Calibration sources in §7 are exclusively LongMemEval, LoCoMo, DMR (public benchmark replays) and Lethe's own opt-in audit-log capture (`scripts/eval/lethe_native/loader.py::capture_opt_in_trace`).
+- Verifiable: `grep -i scns docs/05-scoring-design.md` returns four hits, each restating the constraint or its verifiable absence — none source calibration data from SCNS.
+- The v1.0 strict stratum has no operator share (per §10.5). WS5 accepts the deferral cost: v1.0 tunes against adversarial + ablation + replay-only; v1.1 BO sweep (gap-03 candidate b) and v1.x per-tenant retune both follow once `lethe_native::capture_opt_in_trace` (WS6) ships.
+
+**Forward-spec on `metrics/emitter.py`.** WS5 names `emit_score_event(event)` as a v2 signal-sink extension to the existing batch-report emitter. The function is **not** implemented in WS5 (math doc, not code); its contract surface is specified in `docs/05-scoring-design.md` §8.4 with input schema, validation gates (`contamination_protected`), and on-disk layout (`<run_dir>/score_events/<tenant_id>/<yyyy>/<mm>/<dd>.jsonl`). WS6 owns the implementation alongside the opt-in capture verb.
+
+### 11.4 Reading order for **WS5-QA** (fresh-eyes pass)
+
+The WS5-QA author should approach this cold and answer one question: **does this give a WS6 (API) author and a WS7 (migration) author enough scoring substrate to start without re-research?**
+
+Read in this order:
+
+1. `docs/05-scoring-design.md` start to finish. Pay particular attention to §3 (consolidate-time per-term derivations), §4 (recall-time RRF + post-rerank), §5 (per-class dispatch — verify exhaustiveness over gap-09 §3 four shapes), §6 (bi-temporal invalidation — verify utility-tally freeze and revalidate-replay semantics), §7 (tuning-knob table — verify every row has both a calibration source and an eval signal), §8 (v2 log-signal contract — verify replayability invariant is sufficient for offline `(features, outcome)` derivation).
+2. `docs/03-gaps/gap-03-scoring-weights.md` cross-checked against §3, §4, §7 of `05-scoring-design.md`. Are the v1 defaults (`α=0.2, β=0.3, γ=0.2, δ=0.4, ε=0.5`; RRF `k=60`; `w_intent=0.15`; `w_utility` ramp 0→0.2) faithful to gap-03 §5 candidate (a)?
+3. `docs/03-gaps/gap-09-non-factual-memory.md` §3 + §7 cross-checked against §5 of `05-scoring-design.md`. Are all four persistent shapes covered with explicit per-class formulas (not "generic + adjust per class")? Are the non-persistent classes noted as out-of-scope?
+4. `docs/03-gaps/gap-13-contradiction-resolution.md` §3.1 + §7 cross-checked against §3.5 + §6 of `05-scoring-design.md`. Is the log-dampened ε amplification present? Are revalidate replay semantics specified?
+5. `docs/04-eval-plan.md` §5 + §6 cross-checked against the §7 tuning-knob table. Does every knob cite a per-phase signal (§6) and a headline metric (§5)? Are the keep/replace/extend triggers stated?
+6. `docs/04-eval-plan.md` §4.6 + §10 + `scripts/eval/metrics/emitter.py` + `scripts/eval/lethe_native/loader.py::capture_opt_in_trace` cross-checked against §8.4 of `05-scoring-design.md`. Is the `emit_score_event` sink contract precise enough (input schema, validation gates, on-disk layout) that a WS6 implementer would not need to re-research the contract?
+7. `docs/HANDOFF.md` §10 binding constraint cross-checked against `docs/05-scoring-design.md` §7. Run `grep -i scns docs/05-scoring-design.md` and confirm no calibration source row points at SCNS or any foreign system. Same audit pattern as WS4-QA §10.4.
+
+**Anti-checklist (things that should NOT be present):**
+- Any §7 row that names SCNS, `~/.scns/`, or any foreign system as a calibration source.
+- A generic per-class formula with "adjust per class" hand-waving — §5 must be exhaustive over the four shapes.
+- A v2 log-signal envelope missing `contamination_protected`, `tenant_id`, `model_version`, or `weights_version`.
+- A consolidate-time formula that places gravity as a 6th additive term (Q1 chose demotion-floor; an additive form would re-open gap-03's weight tuple).
+- A recall-time formula that uses weighted-sum over sem/lex/graph (Q2 chose RRF + post-rerank per gap-03 §5).
+- A v1.0 calibration plan that assumes operator-trace data exists (the v1.0 strict stratum operator share is empty; WS5 must be tunable against the adversarial + ablation + replay-only stratum).
+
+A QA failure on any anti-checklist item is P0. A QA failure on a missing cross-ref or under-specified emit-point is P1.
+
+### 11.5 Reading order for **WS6** (API author)
+
+WS6 inherits two binding deliverables from WS5:
+
+- **`emit_score_event(event)`** — a per-event signal sink to be added to `scripts/eval/metrics/emitter.py`, contract in `docs/05-scoring-design.md` §8.4. Pairs with `capture_opt_in_trace`.
+- **`capture_opt_in_trace`** — the v1.x operator-trace ingest contract specified in `scripts/eval/lethe_native/loader.py` (line 77) and bound in HANDOFF §10.6 as a WS6 deliverable.
+
+Read in this order:
+
+1. `docs/05-scoring-design.md` §8 (v2 log-signal contract) — your input contract for the emit-point side.
+2. `docs/05-scoring-design.md` §4 + §6 — the recall-time scoring path and the bi-temporal validity filter; both surface at the API as request-time concerns (`recall(query)` must apply §4.1 before any retriever is consulted).
+3. `docs/03-composition-design.md` §3 — what's stored where; the API surface delineates S1/S2/S3 read paths.
+4. `docs/04-eval-plan.md` §4.6 — the opt-in audit-log capture pipeline. WS6 owns the verb implementation; the eval-plan owns the downstream ingest path.
+5. `docs/HANDOFF.md` §10 (binding constraint) — no SCNS compatibility shim; no foreign-system data sources.
+6. `docs/03-gaps/gap-12-intent-classifier.md` §8 — classifier touch-points at the API surface (intent attaches to a query before recall).
+7. `docs/03-gaps/gap-09-non-factual-memory.md` §6 — the per-class always-load semantics for preferences (10 KB cap) interacts with the recall API's response shape.
+
+**Binding constraints from WS5:**
+- Every recall-time response must emit a `recall` event per §8.2 envelope (one per top-k candidate). Outcomes flow back via `recall_outcome` events with a `recall_id` join key. Implement the join-key generation deterministically (uuidv7 keyed on `tenant_id + ts_recorded + query_hash`).
+- Every consolidate-phase boundary must emit a `consolidate_phase` event. WS5 names six phases (extract / score / promote / demote / consolidate / invalidate); WS6 wires the emit-points around each.
+- The bi-temporal validity filter (§4.1) is **applied before** any retriever; do not score-then-filter (cost) and do not skip the filter on "small" stores (correctness).
+- The preference always-load path (§5.2) is not a scoring decision at request-time; it is an unconditional include up to 10 KB. Recall-time scoring orders preferences inside the cap; it does not gate inclusion.
+
+### 11.6 Open items / follow-throughs WS5 left for downstream
+
+- **`emit_score_event` implementation (WS6).** Contract is set; implementation pairs with `capture_opt_in_trace`. WS6 also owns the per-tenant audit-log table layout in S2 referenced in §8.4.
+- **`procedure` `type_priority` value.** §3.4 table does not list `procedure`; Appendix A treats it as `feedback` tier (0.55) as a residual unknown. v1.1 BO sweep should fit it explicitly. Owner: WS5 v1.1 / scoring-tuning task.
+- **Gravity computation cost at scale (§10 residual unknown #2).** `cascade_cost` is `O(|N_2hop|)` per fact per consolidate. May need batched / cached reformulation if S3 grows beyond ~10⁶ edges per tenant. Owner: composition / WS6 implementation.
+- **Utility-half-life vs recency-half-life decoupling (§10 residual unknown #4).** Both default `30 d`; v1.1 BO sweep should treat them as independent dimensions.
+- **v2 entry-criteria gate.** v2 unblocks at ≥20% strict-stratum operator share **and** ≥10k labeled `(recall, outcome)` pairs (§8.6). Tracking owner: WS8 (deployment / cadence).
+
+WS5 is closed. The next QA pass should ask: **"Does WS5 give a WS6 (API) author and a WS7 (migration) author enough scoring substrate to start without re-doing scoring research?"** §11.4 (WS5-QA reading order) and §11.5 (WS6 reading order) are the explicit answers.
