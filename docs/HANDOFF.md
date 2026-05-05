@@ -767,3 +767,105 @@ WS8 inherits the operator-knob surface and the deployment-shape decisions WS7 de
 - **Manifest UX surface** (§10). CLI / JSON / HTML; punted to operator-tooling pass. Owner: operator-tooling pass.
 
 WS7 is closed. The next QA pass should ask: **"Does WS7 give an operator (and migration-tool implementer) enough substrate to plan and execute an in-place SCNS-corpus → Lethe-tenant migration without re-doing migration research, and does every binding invariant from upstream WS survive intact?"** §14.4 (WS7-QA reading order) and §14.5 (WS8 reading order) are the explicit answers.
+
+---
+
+## §15 Post-WS8 update — deployment design shipped
+
+### 15.1 What WS8 produced
+
+`docs/08-deployment-design.md` (single commit, 793 lines). Scope:
+
+- **§0 Frame** — what WS8 owns (RBAC + capability map; rate-limit numerical caps; wire-format choice; operator knobs; `health()` extensions; alarm thresholds; escalate-review pipeline; migration runtime contract; backup posture; v2 entry-criteria gate; single-tenant-per-deployment posture), what it does NOT own (verb semantics, migration phase order, scoring math, eval-set composition, retention engine internals, migration-tool implementation bytes, auth-mechanism implementation, cross-deployment Lethe→Lethe, multi-tenant runtime). Six binding constraints enumerated. §0.4 operator-vocabulary index (19 terms defined for non-engineer reader on first use).
+- **§1 Deployment topology** — single-tenant-per-deployment v1 baseline (composition §1.1 + §5.2); recommended single-host physical layout per store (S1–S5 colocation table); `single_writer_per_tenant=true` migration default (gap-04 §4 stop-gap); v2 multi-tenant gate forward-ref to §10.
+- **§2 RBAC + auth + wire-format** — three roles (`agent` / `tenant_admin` / `operator`); capability-to-verb matrix (every api verb mapped to required capability); principal-extraction contract; **decision: JSON over HTTP/1.1 with optional MCP framing** (rationale table; protobuf/gRPC rejected for v1).
+- **§3 Rate-limit + quota table** — 11 rows; numerical caps for every api hook (`recall` 30/s; `remember` 10/s; `forget(invalidate|quarantine)` 5/s; `forget(purge)` 10/h-100/d per tenant; `peer_message` 20/s; `consolidate(force)` 6/h; `capture_opt_in_trace` 10/h; escalate-staging cap 50/d; `audit()` 10/s; `health()` unbounded). Rationale per row.
+- **§4 Operator knobs** — gate interval (15 min default w/ range table; gap-01 §3.2 Q3); lock heartbeat (30 s / 60 s break; gap-01 §3.2 Q3 + gap-08 §3.4 lifted to defaults); idempotency-key TTL (24 h default; **7-day enforced ceiling** — config validator rejects values >7d at startup; above-ceiling guidance: chunk by snapshot); preference-cap (10 KB recency-of-revision); drift cadence (continuous 5%/hour sample, monthly re-eval, quarterly fresh-adversarial-slice); recall-determinism drift tolerance (5% default); escalate cap reaffirmed; mid-migration async-drain alarm (1.5× gate, stricter than steady-state 2×).
+- **§5 Health + observability** — additive `health()` extensions (migration progress, idempotency-key TTL fallback rate, escalation queue depth, drift state, v2-gate state) — non-breaking on api §4.4; `audit()` operator query patterns; 18 must-emit metrics signals; **8 must-wire alarms** (`consolidation_stalled`, `escalation_queue_depth`, `idempotency_fallback_high`, `s3_backfill_stalled`, `drift_high`, `degraded_mode_active`, `forget_purge_rate_spike`, `tenant_isolation_breach` P0).
+- **§6 Escalate-review pipeline** — review-queue substrate in S2; review actions (`approve` / `reject` / `expire-now`); **`force_skip_classifier=true` parameter** introduced as a v1 api §3.1 surface extension (auth-gated to `tenant_admin`; WS6 implementation pass adds it to api §3.1); 24-hour review SLA, 30-day queue TTL; migration `escalated`-row drain workflow (post-cutover; introduces `escalated_rejected` terminal status).
+- **§7 Migration runtime contract** — `lethe-migrate` CLI subcommand surface (12 subcommands mapping 1:1 to migration §3.1 phases / phase-gates); manifest UX (`manifest.jsonl` shape, HTML status surface, JSON dump); capability-check ordering for Phase 1; snapshot UX methods (`git-tag` / `fs-copy` / `zfs-snapshot`); rollback scope (pre-cutover only; post-cutover deferred to cross-deployment migration spec).
+- **§8 Backup / restore + crash recovery** — per-store backup posture table (SQLite online-backup on quiesce; native procedures for Graphiti backing DB; git for S4a; cross-deployment restore deferred); `lethe-audit lint --integrity` operator invocation surface; `lethe-admin lock` recovery commands; disk-full thresholds (1 GB / 100 MB) with `5xx store_unavailable` hint.
+- **§9 Degraded modes operator playbook** — full cross-walk to composition §7 + §7.1; for every degraded mode (15 rows including the two-stores-down combinations), operator-action column, and silent-by-design column.
+- **§10 v1 → v2 entry-criteria gate** — scoring §8.6 two conditions (strict-stratum operator share ≥20%; ≥10 000 labeled `(recall, outcome)` pairs) lifted to `health().v2_gate` gauges; **3-month soak rule** for cutover (composition §1.1 single-tenant baseline is irreversible-shaped); v2 readiness checklist (7 items).
+- **§11 Verification audits** — five audit transcripts in-doc: (a) operator-readability (all 19 §0.4 terms defined); (b) citation coverage (every numeric default has §-ref or named v1 bet); (c) anti-checklist (§12 self-check); (d) **SCNS-independence** (11 hits, all in allowed categories — HANDOFF citations, migration/dream-daemon cross-refs as design-pattern reference, anti-checklist denial, audit transcript itself); (e) **markdown-audience** (2 hits, both meta-references forbidding the framing; zero hits as actual assertions).
+- **§12 Anti-checklist** — 12 explicit denials (no transport-layer implementation, no migration-tool source code, no scoring weight values, no eval-set composition, no SCNS runtime path, no cross-deployment Lethe→Lethe, no `vault.db` consumption, no auth-mechanism implementation, no multi-tenant runtime, no v2 design, no schema-migration policy, no Lethe distribution artifact).
+- **§13 Traceability matrix** — every WS8 decision mapped to its composition / scoring / api / migration / gap / HANDOFF source.
+- **§14 Residual unknowns** — metrics-pipeline implementation; review-surface HTML implementation; `lethe-migrate` / `lethe-admin` CLI implementations; `force_skip_classifier=true` formal addition to api §3.1 (WS6 implementation pass); cross-deployment restore (v1.x); 2PC for cross-host T1 (v2); v2 multi-tenant runtime design; wire-format re-evaluation at v2 fleet scale; backup quiesce automation; disk thresholds at fleet scale; "3 consecutive months" reset semantics under partial-month outages; RBAC management API.
+
+### 15.2 Commits on `main`
+
+- `e20736a` — `docs(ws8): deployment design (operator knobs, RBAC, rate-limits, observability, escalate-review pipeline)`.
+- (this commit) — `docs(handoff): WS8 post-update — deployment design shipped`.
+
+### 15.3 Architectural notes
+
+**No new architectural corrections.** The §0.3 binding constraints (single-tenant-per-deployment v1 baseline; no SCNS runtime dependency; cross-tenant reads forbidden; markdown dual-audience; numeric defaults cite or are named-as-bet; operator-facing terms defined inline) are reaffirmations of upstream commitments at the deployment surface:
+
+- The §11.4 SCNS-independence audit confirms **zero verb signatures, zero schema fields, zero runtime read paths** reference SCNS. All 11 SCNS mentions fall into allowed categories: HANDOFF §10 citations; the §12 anti-checklist denial; design-pattern cross-references where the upstream doc itself cites SCNS (gap-01 dream-daemon evaluation; migration-corpus naming); the audit transcript itself.
+- The §11.5 markdown-audience audit confirms **zero framing assertions** of "for humans only"; both grep hits are meta-references forbidding the framing.
+
+**Decisions locked in WS8** (each documented in `docs/08-deployment-design.md`, traceable in plan-mode dialogue):
+
+1. **Three RBAC roles** — `agent` (no capabilities; verb-level access only), `tenant_admin` (`tenant_admin` + `forget_purge`), `operator` (all three including `audit_global`). `forget_purge` lives on `tenant_admin` not `operator` because hard-delete is data-sovereignty, not ops-fleet.
+2. **JSON over HTTP/1.1 + optional MCP framing.** Protobuf / gRPC rejected for v1 on tooling cost; revisitable at v2 fleet scale.
+3. **Rate-limit caps per verb table** (§3) — every cap cites its api §-ref attach point.
+4. **Gate interval 15 min default; lock heartbeat 30 s / 60 s break.** gap-01 §3.2 Q3 + gap-08 §3.4 lifted to defaults.
+5. **Idempotency-key TTL: 24 h default; 7-day hard ceiling enforced** at runtime startup (config validator rejects >7d). Above-ceiling escape: chunk by snapshot. The 7-day ceiling is the WS8 commitment that closes HANDOFF §14.6's TTL-extension residual.
+6. **Mid-migration async-drain alarm at 1.5× gate** (steady-state stays 2×). Closes the HANDOFF §14.6 Phase-9 drain-alarm-threshold residual.
+7. **`health()` extensions are additive only** to api §4.4 — no breaking change to the published api surface.
+8. **8 must-wire alarms with explicit thresholds** — `tenant_isolation_breach` is **P0** (composition §5.2 invariant violation; should be impossible by construction).
+9. **`force_skip_classifier=true` parameter on `remember`** — WS8 introduces the contract; gated to `tenant_admin`; auditable in S5; WS6 implementation pass adds it to api §3.1.
+10. **Migration `escalated`-row drain is post-cutover.** Phase-gate C lints applied rows; staged rows have no S1 episodes to lint. Introduces `escalated_rejected` as a new terminal manifest status.
+11. **`lethe-migrate` CLI subcommand surface** — 12 subcommands; the bytes are operator-tooling pass; this doc names the contract.
+12. **Manifest format: `manifest.jsonl`** — one row per line, append-only with status-update rewrite via atomic-rename.
+13. **Backup posture: SQLite online-backup API for S2/S5 on quiesce; native procedures for Graphiti backing DB.** Cross-deployment restore deferred to v1.x.
+14. **v2 cutover decision rule: both scoring §8.6 gates GREEN for 3 consecutive months.** Composition §1.1 single-tenant-per-deployment is irreversible-shaped; soak prevents flap.
+
+### 15.4 Reading order for **WS8-QA** (fresh-eyes pass)
+
+The WS8-QA author should approach this cold and answer one question: **does this give an operator enough substrate to deploy, monitor, and operate a single-tenant Lethe deployment without re-researching upstream contracts, and does every binding invariant from upstream WS survive intact at the operator surface?**
+
+Read in this order:
+
+1. `docs/08-deployment-design.md` start to finish. Pay particular attention to §0.3 (six binding constraints — verify each cites an upstream §-ref correctly), §0.4 (operator-vocabulary index — verify each term is defined inline OR via §0.4 cross-link on first body occurrence), §2 (RBAC roles + capability map — verify every api capability from api §0.2 + §3.3 + §4.1 + §4.4 is covered), §3 (rate-limit table — verify every "rate-limit" attach point in api §1.6 + §2.1.2 + §3.3 + §3.4 + §4.3 has a row), §4.3 (idempotency-key TTL ceiling — verify the rejection rule is enforced, not advisory), §5.2 (`health()` extensions — verify additive, non-breaking on api §4.4), §11 (five audit transcripts — re-run each fresh).
+2. **`docs/03-composition-design.md` §1.1** — the **dual-audience markdown principle**. Per HANDOFF §13 (cascade record), this is canonical and any "for humans only" framing in WS8 artifacts would be a regression. Verify §11.5 audits cleanly and that §6.2 (review-surface HTML), §7.2 (manifest HTML), §9 (degraded-mode playbook prose) all use dual-audience language.
+3. `docs/06-api-design.md` §0.2 + §1.6 + §2.1.2 + §3.3 + §3.4 + §4.1 + §4.3 + §4.4 + §8 cross-checked against §2 + §3 + §5 of `docs/08-deployment-design.md`. Are all WS6-deferred items (rate-limit numerical caps, capability-to-role mapping, wire-format choice) committed by WS8? Are the `health()` additions strictly additive (no field renamed, no field removed, no semantic change to existing fields)? Is the `force_skip_classifier=true` extension flagged as a WS6 implementation-pass follow-through?
+4. `docs/07-migration-design.md` §3 + §4 + §5.1 + §10 cross-checked against §6 + §7 + §4.8 of `docs/08-deployment-design.md`. Is the migration §3.1 phase plan covered 1:1 by `lethe-migrate` subcommands (§7.1)? Is the migration §5.1 escalation-handling row resolved by §6's review pipeline? Is migration §10's residual list (Phase 9 drain alarm, idempotency TTL extension instrumentation, Phase 11 backfill progress, sensitive-content review workflow, manifest UX) all closed or explicitly forwarded?
+5. `docs/03-composition-design.md` §7 + §7.1 cross-checked against §9 of `docs/08-deployment-design.md`. Does the §9 playbook cover every composition §7 row in operator-action terms? Are the two-stores-down §7.1 cases all named?
+6. `docs/03-gaps/gap-01-retention-engine.md` §3.2 cross-checked against §4.1 + §4.2 of `docs/08-deployment-design.md`. Are the gate-interval and lock-heartbeat defaults faithful to the gap-01 commitments (per-tenant lock + 30 s heartbeat)? Is the 15-min gate-interval default named as a v1 bet (not as a derivation)?
+7. `docs/03-gaps/gap-08-crash-safety.md` §3.4 + §3.5 + §3.6 cross-checked against §4.2 + §8.2 + §8.3 + §8.4 of `docs/08-deployment-design.md`. Is `lethe-audit lint --integrity` named as the operator surface for both startup integrity (gap-08 §3.5) and migration phase-gates A + C? Is the lock-recovery surface (§8.3) consistent with gap-08 §3.4? Are disk thresholds (§8.4) consistent with gap-08 §3.6 retention-proof-before-delete ordering?
+8. `docs/03-gaps/gap-14-eval-set-bias.md` §5(3) cross-checked against §4.5 + §5.5 (`drift_high` alarm) of `docs/08-deployment-design.md`. Is the continuous-drift cadence (5%/hour sample) faithful? Is monthly re-eval scheduled? Is the 10% drift threshold explicit?
+9. `docs/05-scoring-design.md` §8.6 cross-checked against §10 of `docs/08-deployment-design.md`. Are the two gates exposed verbatim via `health().v2_gate`? Is the 3-month soak rule clearly an addition (not a contradiction) to scoring §8.6's two gates?
+10. `docs/HANDOFF.md` §12.6 + §14.6 binding constraints cross-checked against §13 (traceability matrix) of `docs/08-deployment-design.md`. Run `grep -in scns docs/08-deployment-design.md` and confirm every hit falls into the allowed categories listed in §11.4 of that doc. Same audit pattern as WS4-QA §10.4, WS5-QA §11.4, WS6-QA §12.4, WS7-QA §14.4.
+
+**Anti-checklist (things that should NOT be present):**
+
+- Any verb signature in `docs/08-deployment-design.md` that adds to the api surface, except `force_skip_classifier=true` on `remember` (which IS a documented WS8 extension; flagged for WS6 implementation pass).
+- Any change to api §4.4 `health()` schema that removes or renames a field (additions only).
+- Any rate-limit cap that lacks an api §-ref attach point.
+- Any operator knob default that lacks a citation OR an explicit "v1 bet" naming.
+- Any operator-vocabulary term used in the body without a §0.4 entry or inline definition.
+- Any "for humans only" framing for markdown surfaces (HANDOFF §13 cascade; composition §1.1 binding) — except as a meta-reference forbidding the framing in §0.3 / §11.5.
+- Any commitment to a specific auth provider (OAuth, JWT, mTLS) — §2.3 specifies the contract, not the mechanism.
+- Any cross-deployment Lethe→Lethe restore path in v1 (deferred per §8.1 + gap-08 §5).
+- Any `vault.db` consumption (out of scope per migration §1.1 + §8).
+- A v2 multi-tenant cutover triggerable by configuration (§10 requires runtime upgrade + 3-month soak).
+- A `forget(purge)` cap that is per-principal rather than per-tenant (§3 specifies per-tenant; multiple admins must not aggregate to bypass).
+
+A QA failure on any anti-checklist item is a P0; a QA failure on a missing or weak cross-ref is a P1.
+
+### 15.5 Open items / follow-throughs WS8 left for downstream
+
+- **Metrics-pipeline implementation.** §5.4 names the must-emit signals; the actual exporter (Prometheus, OTLP, log-scraper, etc.) is deployment-specific. Owner: operator-tooling pass / per-deployment.
+- **Review-surface HTML implementation** (§6.2). Static-rendered shape specified; renderer is operator-tooling pass.
+- **`lethe-migrate` CLI implementation** (§7). Contract specified; bytes are operator-tooling pass.
+- **`lethe-admin` CLI for lock recovery** (§8.3). Same as above.
+- **`force_skip_classifier=true` formal addition to api §3.1.** Owner: WS6 implementation pass. Single-line addition to api §3.1 inputs with `tenant_admin` auth check; until then, `docs/08-deployment-design.md` §6.3 is the contract reference.
+- **Cross-deployment Lethe→Lethe restore** (§8.1). Deferred to v1.x; same shape as the cross-deployment migration spec WS7 §10 deferred.
+- **2PC for cross-host T1.** Deferred to v2 (gap-08 §5).
+- **v2 multi-tenant runtime design.** §10 names the gate; the v2 design itself is a future workstream (gap-04 v2 multi-writer concurrency; RBAC fleet role; cross-tenant routing).
+- **Backup quiesce automation.** §8.1 names the windows; orchestration (consolidate-lock acquire → backup → release) is operator-tooling pass.
+- **"3 consecutive months" reset semantics under partial-month outages.** §10 specifies the rule; exact reset behavior under intra-month flap is operator-tunable but undefined here. v1.x refinement.
+- **RBAC management API.** §2.1 has roles edited via S2 config + restart; a v1.x administrative API verb is a future surface.
+
+WS8 is closed. The next QA pass should ask: **"Does WS8 give an operator enough substrate to deploy, monitor, and operate a single-tenant v1 Lethe deployment without re-doing deployment research, and does every binding invariant from upstream WS survive intact at the operator surface?"** §15.4 (WS8-QA reading order) is the explicit answer.
