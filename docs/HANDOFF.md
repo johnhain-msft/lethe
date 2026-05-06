@@ -869,3 +869,94 @@ A QA failure on any anti-checklist item is a P0; a QA failure on a missing or we
 - **RBAC management API.** §2.1 has roles edited via S2 config + restart; a v1.x administrative API verb is a future surface.
 
 WS8 is closed. The next QA pass should ask: **"Does WS8 give an operator enough substrate to deploy, monitor, and operate a single-tenant v1 Lethe deployment without re-doing deployment research, and does every binding invariant from upstream WS survive intact at the operator surface?"** §15.4 (WS8-QA reading order) is the explicit answer.
+
+---
+
+## §16 Post-IMPLEMENTATION update — planning phase complete
+
+### 16.1 What landed
+
+`docs/IMPLEMENTATION.md` (678 lines, single commit). Scope:
+
+- **§0 Frame** — what IMPLEMENTATION.md owns (phase ordering; per-phase file-level changes; per-phase exit criteria; phase DAG; risk register; cutover gate; deferral index; bidirectional traceability; anti-checklist; in-doc audits) and what it does NOT own (re-deciding any locked WS0–WS8 decision; byte-level code; SCNS runtime path; cross-deployment Lethe→Lethe; auth mechanism; wire-format library; metrics-export mechanism; v2 design). 13 binding upstream invariants enumerated (I-1 through I-13).
+- **§1 Phase ordering rationale** — bottom-up shape: substrate → write path → read path → consolidate → lifecycle writes → surface completion → operator surface → migration tooling → eval wiring → cutover. Rationale for why bottom-up over top-down. WS sources by phase.
+- **§2 Phases (P1–P10)** — 10 phases, each with goal, file-level change list (paths), exit gates, upstream §-refs, DAG dependencies, OOS-for-this-phase. Phase boundaries align with distinct gating tests; merge to 8 / split to 12 considered and rejected.
+- **§3 Risk register** — 16 risks with P0/P1/P2 prioritization rubric. 4×P0 (markdown scale, crash-safety, provenance loss, tenant isolation), 4×P1 (scoring miscal, utility-feedback loss, classifier mis-route, idempotency-TTL edge cases), 8×P2 (deferrable). Cross-phase mitigation notes.
+- **§4 Cutover gate** — v0→v1 first production deployment; explicitly distinguished from v1→v2 path. Five conditions; soak rule applies to v1→v2, not v0→v1.
+- **§5 Post-v1 deferrals** — 28-row index of every deferred item across upstream WS / HANDOFF residuals.
+- **§6 Traceability matrix** — bidirectional. Forward: phase × workstream (10 phases × 7 source areas). Reverse: locked decision → realizing phase (40/40 locked decisions across WS3 + WS5 + WS6 + WS7 + WS8 mapped; zero unrealized).
+- **§7 Anti-checklist** — 10 explicit denials with verifiable checks.
+- **§8 Verification audits** — 5 audits, full transcripts in-doc (per WS8 §11.4 precedent): (a) SCNS-independence grep audit (14 hits, all in allowed categories — boundary citations / migration cross-refs / `provenance.source_uri` literals / §5 deferral rows / §7 anti-checklist denial / §8.a transcript itself); (b) phase-cycle audit (full edge list inline; topological order P1→P10; ACYCLIC); (c) coverage audit (forward 10/10 phases cite WS sources; reverse 40/40 locked decisions realized); (d) anti-checklist self-check (all 10 items pass); (e) operator-readability spot-check (file paths concrete; zero TBD/FIXME/TODO in body).
+- **§9 Residuals** — 3 implementation-plan-local open items (test-file path convention; src/ layout convention; phase-internal task ordering — all acceptable as implementer-discretion).
+- **§10 Changelog** — v1 entry.
+
+### 16.2 Commits on `main`
+
+- `698488b` — `docs(impl): implementation plan (phased; P1–P10)`.
+- (this commit) — `docs(handoff): §16 post-IMPLEMENTATION update — planning phase complete`.
+
+### 16.3 Architectural notes
+
+**No new architectural corrections.** The cascade of binding constraints (HANDOFF §10 Lethe-stands-alone; §13 markdown dual-audience; §11.5 / §12.5 / §14.5 / §15.4 derivative bindings) all survive the implementation-plan layer. IMPLEMENTATION.md is contract-shaped — it cites every upstream §-ref and introduces zero new numeric defaults of its own. The §8.c coverage audit confirms 40/40 locked decisions realize in a phase; the §8.a SCNS-independence grep confirms zero runtime SCNS hits.
+
+**Decisions surfaced and approved during plan-mode** (per facilitator handoff):
+
+1. **10 phases** (rejected 8-phase merge for losing phase-exit clarity; rejected 12-phase split for false granularity).
+2. **DMR gates P3** (sanity floor); **LongMemEval gates P9** (quality bar); **LoCoMo as P9 signal, not blocker** (its scoring methodology is the relevant signal at v1, not the absolute number).
+3. **R4 (tenant isolation) stays P0** (deployment §5.5 + locked WS8 #8 explicitly P0).
+4. **Drop markdown-audience grep audit; merge citation-coverage into coverage audit** (cascade closed at WS7-QA + WS8-QA per HANDOFF §13; IMPLEMENTATION.md introduces zero new numeric defaults).
+5. **Length 700–800 lines target; final 678** (within bound; no scope-creep into byte-level specification).
+
+### 16.4 Planning phase status
+
+PLAN.md §Deliverables roll-call:
+
+| # | Deliverable | Status |
+|---|---|---|
+| 1 | `docs/00-charter.md` through `08-non-goals.md` (recast as `08-deployment-design.md` per WS8) | ✅ all landed |
+| 2 | Populated gap deep-dives under `docs/03-gaps/` | ✅ 14 briefs |
+| 3 | Runnable eval-harness skeleton | ✅ `scripts/eval/` skeleton + adapters/metrics/chaos/contamination subpackages |
+| 4 | `docs/IMPLEMENTATION.md` | ✅ this update |
+| 5 | **Go / no-go recommendation** | ⏳ **only remaining surface** |
+
+The planning phase has produced every artifact PLAN.md committed to except item 5. All nine workstreams (WS0–WS8) plus their QA passes and nit-fixes are on `origin/main`. The composition / scoring / api / migration / deployment / eval substrates are internally consistent (verified by each WS-QA's in-doc audits and by the IMPLEMENTATION.md §6.2 reverse-traceability matrix).
+
+### 16.5 What the go/no-go pass owns
+
+The go/no-go recommendation is the planning-phase exit. It is **not** another design document. Expected shape (drawn from PLAN.md §North star + the QA precedent of evaluating substrate against the "true and practical" charter test):
+
+- A verdict (GO / NO-GO / GO-WITH-CONDITIONS).
+- A summary of what the planning phase produced and what it leaves for implementation.
+- An assessment against the charter's three failure-mode rules (not "wrapper over Graphiti"; not "bag of best-practices"; not "research artifact").
+- Identification of any residual planning-phase risks that the implementation phase inherits (likely the §3 risk register P0 entries).
+- Recommendation on cadence for the implementation phase.
+
+### 16.6 Reading order for the **go/no-go author** (fresh-eyes pass)
+
+The go/no-go author should approach the corpus cold and answer one question: **does the planning phase output a "true and practical" path to v1, or does it ship a survey paper?**
+
+Read in this order:
+
+1. `PLAN.md` start to finish, especially §North star and §Deliverables.
+2. `docs/00-charter.md` — the three failure-mode rules at §North star and the "true, practical solution" commitment.
+3. `docs/02-synthesis.md` — what the field collectively knows, where it hand-waves, what Lethe commits to owning.
+4. `docs/03-composition-design.md` §1.1 + §2 + §8.3 — the architectural skeleton; verify Candidate C topology is the rationale-supported answer to the composition question.
+5. `docs/IMPLEMENTATION.md` start to finish — the build-side plan; verify §6.2 reverse-traceability covers every locked decision; verify §8 audits all pass on a re-run.
+6. `docs/HANDOFF.md` §13–§16 — the cascade record; verify no architectural correction is unaccounted for.
+7. Spot-check WS-QA verdicts (`docs/QA-WS{0-WS2,3,4,5,6,7,8}.md`) — every WS landed APPROVE-WITH-NITS or stronger; nits all fixed in the recorded commits.
+
+**Decision substrate the go/no-go author has to weigh:**
+
+- **For GO:** every WS landed; every locked decision has a realizing phase (IMPLEMENTATION.md §6.2); the architectural commitments (Candidate C; bi-temporal pre-filter; idempotency-everywhere; provenance-required; markdown dual-audience; single-tenant v1) are coherent and evidence-cited; the eval substrate is wired (DMR sanity + LongMemEval primary + LoCoMo secondary + chaos + drift); the v2 path is explicitly out-of-scope, not hand-waved.
+- **For pause / NO-GO:** the v1.0 strict eval stratum has empty operator share (HANDOFF §10.5 — accepted deferral cost); scoring weight tuning is gap-03 §5 candidate (a) defaults rather than a calibrated tuple (P9 BO sweep is v1.1); the `lethe-migrate` / `lethe-admin` CLIs and review-surface HTML are operator-tooling-pass artifacts deferred from v1 (HANDOFF §15.5); cross-deployment restore is deferred (deployment §8.1).
+
+The go/no-go author decides whether these deferrals are coherent ("v1 is true and practical with these exact deferrals") or scope-creep-shaped ("these deferrals collectively turn v1 into a substrate for v2 rather than a usable v1").
+
+**Anti-checklist for the go/no-go pass:**
+
+- Do not re-decide any locked WS0–WS8 decision. (Same constraint as IMPLEMENTATION.md §7 #1.)
+- Do not propose new design — the planning phase is closed. The go/no-go pass evaluates the planning phase output; it does not extend it.
+- Do not gate go/no-go on calendar — gate on artifact coherence per PLAN.md §Sequencing.
+- Do not require v2 design as a v1 prerequisite — v2 is explicitly deferred (composition §1.1; deployment §10).
+
+Planning phase is closed pending the go/no-go recommendation.
