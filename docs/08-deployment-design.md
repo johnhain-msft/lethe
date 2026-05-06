@@ -266,7 +266,7 @@ A broken lock writes `(broken_holder, presumed_dead_at, broken_by)` to S5 (gap-0
 
 **Default: ≤5% fact-id-set diff per probe.** (migration §3.1 phase 12.) Operator-tunable per migration run via `--drift-tolerance-pct`; values > 10% are CLI warnings (the phase still runs but the operator must confirm).
 
-### §4.7 Sensitive-class escalate cap (peer-class)
+### §4.7 Sensitive-class escalate cap (peer-message-class escalation; api §3.4)
 
 **Default: matches §3 — 50 staged per tenant per day.** Hitting the cap triggers `escalation_queue_depth` alarm (§5.5). A staged episode does NOT count against the requesting principal's `remember` rate-limit; it is counted against the tenant-wide escalate queue.
 
@@ -434,7 +434,7 @@ The review surface reads from S2 directly; it does NOT call api verbs. The revie
 
 | Action | Resulting verb call | Effect |
 |---|---|---|
-| `approve` | `remember(content, intent, idempotency_key, provenance, kind, force_skip_classifier=true)` (or the peer-message analog) where `idempotency_key` is the staged-id | episode admitted to S1; S5 records `review_approved{staged_id, reviewer_principal, reviewed_at, reason}` |
+| `approve` | `remember(content, intent, idempotency_key, provenance, kind, force_skip_classifier=true)` (or the peer-message analog) where `idempotency_key` is the original caller-supplied (or migration-row) idempotency_key; `staged_id` remains as the queue-row identifier for the review surface and S5 audit references | episode admitted to S1; S5 records `review_approved{staged_id, reviewer_principal, reviewed_at, reason}` |
 | `reject` | (no verb call) — staged row is marked `rejected`; payload is purged after `queue_ttl` | S5 records `review_rejected{staged_id, reviewer_principal, reviewed_at, reason}` |
 | `expire-now` | (no verb call) — convenience for operators clearing stale entries | S5 records `review_expired{staged_id, reason="manual_expire"}` |
 
@@ -447,6 +447,8 @@ The review surface reads from S2 directly; it does NOT call api verbs. The revie
 **Default: 24-hour review SLA.** A `pending_review` row older than 24 h trips the `escalation_queue_depth` alarm (§5.5). Rationale: balances "operator must have time to review" against "writes shouldn't sit in limbo indefinitely." Operator-tunable via `tenant_config.review_sla_hours`.
 
 **Default queue TTL: 30 days.** A row in `pending_review` for > 30 days auto-expires (status → `expired`) and the payload is purged. Operator-tunable; lowering increases the rate at which staged content is auto-discarded. Auto-expiry is recorded in S5.
+
+Both defaults (24-hour SLA, 30-day TTL) are v1 bets; instrumented via the `escalation_queue_depth` alarm (§5.5) and revisable per HANDOFF §14.6.
 
 ### §6.5 Migration `escalated` rows — drain workflow
 
@@ -521,7 +523,7 @@ Migration §3.1 phase 2 specifies a content-addressed snapshot. WS8 specifies th
 
 Pre-cutover (Phase 13 not yet executed), a run can be rolled back:
 
-- `lethe-migrate rollback <run_id>` runs `forget(invalidate, target=<applied_episode_id>)` for every manifest row in `done` state, with `idempotency_key` derived per migration §2.3 with discriminant `"rollback"`.
+- `lethe-migrate rollback <run_id>` runs `forget(invalidate, target=<applied_episode_id>)` for every manifest row in `done` state, with `idempotency_key` derived per migration §2.3 (rollback-key derivation block; discriminant `"rollback"`).
 - S4a authored synthesis pages have to be removed manually (filesystem rm) — WS8 documents this as a known limitation; the rollback subcommand surfaces the list of S4a paths to remove. (Rationale: filesystem-level S4a rollback would require a per-run S4a backup; v1 keeps this manual.)
 - S5 records `migration_run_rolled_back{run_id, rows_invalidated, s4a_paths_listed}`.
 
@@ -563,7 +565,7 @@ A stuck dream-daemon lock (§4.2) breaks automatically at `2× heartbeat` (60 s 
 
 Composition §7 row "Disk full" specifies that the runtime monitors disk free and refuses new `remember`s below a threshold. WS8 sets the threshold:
 
-**Default: refuse `remember` at < 1 GB free; refuse `forget(purge)` at < 100 MB free** (purge writes a retention proof BEFORE the delete per gap-08 §3.6, and the proof must succeed). Operator-tunable via `tenant_config.disk_thresholds`. Below threshold, `remember` returns `5xx store_unavailable` with hint `"disk_low"` (api §1.6); `forget(purge)` returns `5xx store_unavailable` with hint `"disk_critical"`.
+**Default: refuse `remember` at < 1 GB free; refuse `forget(purge)` at < 100 MB free** (purge writes a retention proof BEFORE the delete per gap-08 §3.6, and the proof must succeed) (1 GB / 100 MB are v1 bets; expected to retune per-deployment based on tenant write volume and S2/S3 file growth observed). Operator-tunable via `tenant_config.disk_thresholds`. Below threshold, `remember` returns `5xx store_unavailable` with hint `"disk_low"` (api §1.6); `forget(purge)` returns `5xx store_unavailable` with hint `"disk_critical"`.
 
 ---
 
@@ -591,6 +593,8 @@ A cross-walk to composition §7 + §7.1 in operator-action terms. For every name
 | **Clock skew across multi-process Lethe** | Subtle bi-temporal-stamp anomalies. | v1 is single-writer per tenant (composition §7 row). Multi-writer is a v2 problem. | None in v1. |
 
 The §5.5 alarms cover the operator-actionable subset; this playbook is the deeper reference.
+
+Composition §7's "peer-message corrupts a memory" row is intentionally not in this playbook; it is a provenance-enforcement / contradiction-detection (gap-05; gap-13) matter, not an operator alarm-able mode.
 
 ---
 
@@ -668,7 +672,7 @@ PASS.
 
 Same audit pattern as api §7.1, migration §6.6.1. `grep -in "scns" docs/08-deployment-design.md` and confirm every hit falls into allowed categories: HANDOFF citation; the §12 anti-checklist denial; design-pattern cross-references where the upstream doc itself cites SCNS (gap-01 dream-daemon evaluation; migration target-corpus); this audit transcript itself.
 
-**Result (transcribed at commit time):** 11 total hits, all in allowed categories:
+**Result (transcribed at commit time):** 16 total line-hits, distributed across 9 distinct allowed-category buckets:
 
 - §0.3 #2 — binding-constraint statement citing HANDOFF §10 #1 (allowed: HANDOFF citation).
 - §0.4 "Cutover" definition — names "SCNS-as-substrate" as the source side of the cutover concept (allowed: migration cross-reference; the migration target is by definition SCNS).
@@ -676,7 +680,7 @@ Same audit pattern as api §7.1, migration §6.6.1. `grep -in "scns" docs/08-dep
 - §4.1 gate-interval default — "SCNS dream-daemon precedent (note §2.10)" citing gap-01 §3 + dream-daemon design note (allowed: design-pattern reference per HANDOFF §10 binding-constraint #1).
 - §4.3 idempotency TTL row — "SCNS observation rate; small migrations" sizing rationale (allowed: migration cross-reference).
 - §7.4 snapshot UX — "SCNS-corpus migrations" naming (allowed: migration cross-reference).
-- §11.4 (this section) header + body + result paragraph (allowed: audit transcript itself).
+- §11.4 (this section) header + body + result paragraph + per-bullet self-references (allowed: audit transcript itself).
 - §12 anti-checklist denial (allowed).
 - §13 traceability-matrix row (allowed: HANDOFF citation).
 
@@ -686,10 +690,11 @@ Same audit pattern as api §7.1, migration §6.6.1. `grep -in "scns" docs/08-dep
 
 `grep -in "for humans only\|humans only\|human-only" docs/08-deployment-design.md` and read for any framing of markdown as exclusively human-targeted. Per the WS7 §6.6.4 precedent, distinguish (a) framing assertions ("markdown is for humans only") from (b) rule statements / audit-grep self-references that *forbid* the framing.
 
-**Result (transcribed at commit time):** 2 total hits, both meta-references:
+**Result (transcribed at commit time):** 3 total hits, all meta-references:
 
-- §0.3 #4 — binding-constraint statement explicitly forbidding the framing (`Operator-facing prose does not frame markdown as "for humans only"`); allowed.
-- §11.5 (this section) — the audit-grep pattern itself; allowed.
+- §0.3 #4 (line 49) — binding-constraint statement explicitly forbidding the framing (`Operator-facing prose does not frame markdown as "for humans only"`); allowed.
+- §11.5 audit-method paragraph (this section above) — the audit-grep pattern itself, plus the parenthetical framing-assertion example; allowed.
+- §11.5 first result-bullet (this section) — transcribes the §0.3 #4 quoted phrase verbatim while affirming its meta-only nature; allowed.
 
 **Zero hits** of the disallowed framing as an actual assertion. §6.2 review-surface, §7.2 manifest UX, §9 degraded-mode playbook all use "operator", "reviewer", "human", "agent", and "LLM-side reviewer" interchangeably without exclusivity claims. PASS.
 

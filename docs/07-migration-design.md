@@ -208,6 +208,20 @@ forget_key =
 
 The `"forget"` discriminant separates the invalidation-call key from the original `remember`-call idempotency-key (`"idem"`) and from the episode-id (`"epi"`) over the same source bytes, so all three derivations are closed and collision-disjoint by construction.
 
+**Rollback-key** (per deployment §7.5; `lethe-migrate rollback`) — for `forget(invalidate)` calls in the rollback subcommand (which invalidates a manifest's `done`-state rows after a pre-cutover rollback decision), the per-row idempotency-key is a *fourth* uuidv7 derived over the originating `scns_observation_id` with discriminant `"rollback"`; same RFC 9562 layout as above:
+
+```
+rollback_key =
+  uuidv7-formatted (RFC 9562):
+    bits   0..47   (48-bit ms timestamp prefix) = ts_recorded_scns in unix-ms
+    bits  48..51   (4-bit version)              = 0b0111
+    bits  52..63   (12-bit rand_a tail)         = leading 12 bits of sha256(tenant_id ‖ "rollback" ‖ scns_observation_id)
+    bits  64..65   (2-bit variant)              = 0b10
+    bits  66..127  (62-bit rand_b)              = next 62 bits of sha256(tenant_id ‖ "rollback" ‖ scns_observation_id)
+```
+
+The `"rollback"` discriminant separates the rollback-time invalidation key from the migration-time `"forget"` invalidation key, the original `remember`-call idempotency-key (`"idem"`), and the episode-id (`"epi"`) over the same source bytes, so all four derivations are closed and collision-disjoint by construction. The ts source is `ts_recorded_scns` (not rollback-time `now()`) so the key is fully reproducible from manifest inputs alone — the rollback subcommand reads the manifest, which carries `ts_recorded_scns` per row.
+
 `agent_id` (api §1.5): the SCNS session-hook actor where the source carries one (sessions / daily blocks); else the operator running the migration. `derived_from` is unused — that field is the gap-10 §3.3 peer-message slot and migration is not a peer-message context.
 
 ---
