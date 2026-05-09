@@ -500,7 +500,7 @@ remember(
 2. **Validate provenance** (§1.5) — refuse if `source_uri` missing.
 3. **Run intent classifier** (gap-12 §6) — heuristic-first; LLM-residual within the 200 ms budget.
    - Caller-supplied `intent` is honored only if classifier audit confidence is < 0.8 *against* the caller's tag (gap-12 §6 row 6).
-   - **Skip this step entirely if `force_skip_classifier=true`** — only callable by principals holding the `tenant_admin` capability; refuse with `403 forbidden` otherwise. The bypass is the escalate-review approval path (deployment §6.3) so a payload that previously escalated does not re-escalate on re-submission; an S5 `force_skip_classifier_used{episode_id, principal, staged_id?}` audit row is emitted.
+   - **Skip this step entirely if `force_skip_classifier=true`** — only callable by principals holding the `tenant_admin` capability; refuse with `403 forbidden` otherwise. The bypass is the escalate-review approval path (deployment §6.3): a payload that previously escalated does not re-escalate on re-submission. The S5 audit row for this action is `review_approved{staged_id, reviewer_principal, reviewed_at, reason}`, owned by deployment §6.3 (and indexed in §5 row `remember (escalate)`); api §3.1 does not redefine it.
 4. **Branch on class**:
    - `drop` / `reply_only` → `accepted=false`; **return immediately** with `ack="dropped"`. No S1/S2 write; the idempotency_key is recorded so retries are stable.
    - `escalate` → stage episode in S2 quarantine table; **return** with `ack="staged_for_review"`, status **422 classifier_escalate**.
@@ -531,6 +531,7 @@ Phases run **in order**; each is checkpointed in S5 (gap-08 §3.3) so a daemon c
 **Errors**
 
 - `400 missing_idempotency_key`, `400 provenance_required`.
+- `403 forbidden` — `force_skip_classifier=true` requested by a principal lacking the `tenant_admin` capability (deployment §6.3).
 - `409 idempotency_conflict` — same key, different body (§1.2).
 - `422 classifier_escalate` — sensitive-class hit; staged for review.
 - `5xx store_unavailable` — S1 down → hard fail (composition §7 row 1).
