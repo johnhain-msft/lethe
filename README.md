@@ -2,7 +2,7 @@
 
 A memory-runtime service for agent systems. Named for the river of forgetting: retention is a first-class operation, not an afterthought.
 
-> **Status:** planning phase. No runtime code yet. See [`PLAN.md`](./PLAN.md) for the north-star doc and [`docs/`](./docs) for workstream artifacts as they land.
+> **Status:** planning phase complete; design corpus in [`docs/`](./docs). Runtime implementation begins next.
 
 ## Positioning
 
@@ -15,7 +15,6 @@ Any MCP-speaking client. General-purpose service, not an SCNS-internal module.
 ## Layout
 
 ```
-PLAN.md                    north-star planning doc
 docs/
   00-charter.md            mission, scope, non-goals, license
   01-scns-memory-audit.md  current-state audit of SCNS memory
