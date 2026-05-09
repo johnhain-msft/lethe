@@ -960,3 +960,87 @@ The go/no-go author decides whether these deferrals are coherent ("v1 is true an
 - Do not require v2 design as a v1 prerequisite — v2 is explicitly deferred (composition §1.1; deployment §10).
 
 Planning phase is closed pending the go/no-go recommendation.
+
+---
+
+## §17 Planning phase closed
+
+### 17.1 What landed
+
+`docs/GO-NO-GO.md` (555 lines, single commit). Scope:
+
+- **§1 Verdict** — **GO.** Implementation phase unblocked; begin P1 of IMPLEMENTATION.md.
+- **§2 Planning-phase output summary** — deliverables roll-call (5/5, with this artifact closing item 5); workstream artifacts table; locked-decision count (44 across WS3 + WS5 + WS6 + WS7 + WS8); cascade record (3 architectural corrections).
+- **§3 Charter failure-mode assessment** — 3 modes evaluated: "wrapper over Graphiti" EVADED; "bag of best-practices" EVADED; "research artifact" EVADED-WITH-CAVEAT (the empty-strict-stratum-operator-share at v1.0 per §10.5; honest, named, tracked at IMPL §3 R6).
+- **§4 Coherence audit** — 5 cross-WS seams audited (v2-gate; migration phases ↔ `lethe-migrate` subcommands; lock heartbeat; tenant isolation; provenance + migration rollback discriminant) — all COHERENT. Locked-decision realization re-verified (44/44; IMPL §6.2 narrative-count typo surfaced as 40 → 44 follow-up). Architectural-correction lineage verified end-to-end. IMPL §8 audits independently re-run: §8.a–§8.d PASS; §8.e dropped (stylistic, covered upstream); §8.f added (citation-integrity) PASS.
+- **§5 Deferral-coherence assessment** — 30-row deferral table (HANDOFF §16.6 substrate + IMPL §5 28-row index). All 30 clear the 3-condition bar (Named + Bounded + Not-load-bearing-for-charter). **30/30 COHERENT; zero SCOPE-CREEP-SHAPED.**
+- **§6 Residual risks the implementation phase inherits** — IMPL §3 P0 (R1–R4) + P1 (R5–R8) lifted with closing notes; cross-phase-tracked risks called out (R2 + R3 + R6 each span 3 phases). Three implementation-phase-tracked items surfaced (heading-style normalization; IMPL §6.2 narrative typo; api §3.1 `force_skip_classifier=true` formal addition) — all opportunistic doc-hygiene, none gates P1.
+- **§7 Cadence recommendation** — per-3-phases QA pass: G1 (P1+P2+P3 substrate+ingress); G2 (P4+P5+P6 runtime completion); G3 (P7+P8+P9 operator+tooling); G4 (P10 cutover). Recommended QA artifacts `docs/QA-G{1..4}.md` mirroring the WS-QA pattern. Caveat: implementation-phase orchestrator owns the final cadence call; the recommendation is a starting shape.
+- **§8 Anti-checklist self-check** — 6 items (4 from HANDOFF §16.6 + 2 added: scns-repo read-only; no own numeric defaults). All PASS.
+- **§9 Closing** — re-states verdict; names next surface (P1 of IMPLEMENTATION.md).
+
+### 17.2 Commits on `main`
+
+- `f4420fc` — `docs(gonogo): GO/NO-GO recommendation (verdict: GO)`.
+- (this commit) — `docs(handoff): §17 planning phase closed`.
+
+### 17.3 Architectural notes
+
+**No new architectural corrections.** The go/no-go pass evaluates the planning-phase output; it does not extend it. The five cross-WS seams audited at GO-NO-GO §4.1 confirm that the cascade of binding constraints (HANDOFF §10 Lethe-stands-alone; §11 WS6 binding constraints; §13 markdown dual-audience) holds end-to-end through IMPLEMENTATION.md and into the implementation phase. The IMPL §6.2 narrative-count typo (40 → 44) is the only residual artifact-shape finding; the table content is correct, no decision is unrealized, and the typo is captured at GO-NO-GO §6.3 #2 for opportunistic fix.
+
+**Decisions surfaced and approved during plan-mode** (per facilitator handoff):
+
+1. **Verdict shape:** "expect GO; §4 + §5 are disconfirmation tests; flip to GO-WITH-CONDITIONS if either fails." Disconfirmation tests passed; verdict landed as GO.
+2. **5 cross-WS seams:** v2-gate; migration ↔ `lethe-migrate`; lock heartbeat; tenant isolation; provenance + migration rollback discriminant (the proposed swap from recall ↔ scoring envelope to provenance + rollback was approved; rationale: P0 risk R3 + recently nit-corrected at WS8-QA N2 commit `079cff2`).
+3. **Deferral-coherence threshold:** 3-condition conjunctive bar (Named + Bounded + Not-load-bearing-for-charter).
+4. **IMPL §8 audit re-run set:** §8.a–§8.d as-is; §8.e dropped (stylistic, covered by QA-WS8); §8.f added (citation-integrity).
+5. **Cadence recommendation shape:** per-3-phases QA pass (G1/G2/G3/G4), with explicit caveat that the implementation-phase orchestrator owns the final cadence call.
+
+### 17.4 Planning phase status
+
+PLAN.md §Deliverables roll-call:
+
+| # | Deliverable | Status |
+|---|---|---|
+| 1 | `docs/00-charter.md` through `08-deployment-design.md` | ✅ all landed |
+| 2 | Populated gap deep-dives under `docs/03-gaps/` | ✅ 14 briefs |
+| 3 | Runnable eval-harness skeleton | ✅ `scripts/eval/` skeleton + adapters/metrics/chaos/contamination |
+| 4 | `docs/IMPLEMENTATION.md` | ✅ 678 lines, single commit `698488b` |
+| 5 | Go / no-go recommendation | ✅ 555 lines, single commit `f4420fc` |
+
+**5/5 deliverables landed. Planning phase is closed.**
+
+### 17.5 Reading order for the implementation-phase orchestrator (fresh-eyes pass)
+
+The implementation-phase orchestrator inherits the corpus and begins P1 of IMPLEMENTATION.md. Cold reading order:
+
+1. `docs/GO-NO-GO.md` start to finish — the verdict, the deferral set, the cadence recommendation, the residual risks the implementation phase inherits.
+2. `docs/IMPLEMENTATION.md` start to finish — the build-side plan; in particular §2 (per-phase file-level changes + exit gates) and §3 (risk register with mitigation phases).
+3. `docs/HANDOFF.md` §1.3 brief inventory + §13 (markdown audience cascade) + §16 (post-IMPLEMENTATION update) + §17 (this section).
+4. The five WS substrate docs (`docs/03-composition-design.md`, `docs/05-scoring-design.md`, `docs/06-api-design.md`, `docs/07-migration-design.md`, `docs/08-deployment-design.md`) as P1 + P2 + P3 work begins — these are the §-ref targets for IMPL §2 and §6.2.
+5. The 14 gap briefs (`docs/03-gaps/gap-{01..14}-*.md`) on-demand — when a phase exit gate references a gap, read the gap brief.
+6. The WS-QA verdicts (`docs/QA-WS{0-WS2,3,4,5,6,7,8}.md`) on-demand — these are the closure records for upstream design discussions; consult when a contract reading is ambiguous.
+
+**Anti-checklist for the implementation-phase orchestrator** (inherited from IMPL §7 + reaffirmed):
+
+- Do not re-decide any locked WS0–WS8 decision. The cascade record (HANDOFF §11–§17 + each WS-QA + each WS-nit-fix + IMPL §6.2 + GO-NO-GO §4.2) is source-of-truth.
+- Do not specify byte-level code beyond what design docs already specify. The design docs spec contracts; bytes are the implementer's call.
+- Do not add SCNS runtime path. HANDOFF §10 is binding.
+- Do not skip the cross-phase-tracking on R2 + R3 + R6 (GO-NO-GO §6.2). Each spans 3 phases; no single phase fully closes them.
+- Do not gate phase exits on calendar. Gate on artifact-shaped exit criteria per IMPL §2.
+
+### 17.6 Open items / follow-throughs the go/no-go pass leaves for downstream
+
+Three doc-hygiene items, all opportunistic, none gating:
+
+1. **Heading-style normalization in `docs/03-composition-design.md`** — composition uses `## N`; other docs use `## §N`. Normalize composition to `## §N` in a downstream nit-fix when convenient (GO-NO-GO §6.3 #1).
+2. **IMPL §6.2 narrative-count typo** — "Coverage: 40/40 locked decisions mapped to a realizing phase" → should read "44/44" (GO-NO-GO §6.3 #2 + §4.2). Table content is correct.
+3. **api §3.1 formal addition of `force_skip_classifier=true`** — the parameter is in deployment §6.3 + IMPL §6.2 WS8 #9 realizing at P2 + P7, but the api §3.1 doc text does not yet enumerate it. Doc-edit recommended (GO-NO-GO §6.3 #3 + §5.2 #9).
+
+These three are surfaced for awareness; none gates P1 of IMPLEMENTATION.md.
+
+### 17.7 Final close
+
+The Lethe planning phase is closed. The implementation phase is unblocked. The next surface is **P1 of IMPLEMENTATION.md** (storage-substrate scaffolding). The implementation-phase orchestrator inherits the corpus per §17.5 reading order and the cadence recommendation per GO-NO-GO §7 (per-3-phases QA pass; final cadence call belongs to the orchestrator).
+
+PLAN.md §Sequencing pattern continues to apply: no dates; gate on artifacts.
