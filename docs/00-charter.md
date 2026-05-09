@@ -3,7 +3,7 @@
 **Status:** ratified 2026-04-23 from `PLAN.md` scope resolution.
 **Audience:** every subsequent workstream traces decisions back to this doc.
 
-> **Note on planning-phase artifacts.** `PLAN.md` and `docs/HANDOFF.md` were the orchestration artifacts that drove the WS0–WS8 planning phase; both are reachable in git history (final state at commit `54d7a0a`). In-prose citations elsewhere in this corpus of the form *"PLAN.md §WSN Track X"* or *"HANDOFF.md §N"* refer to that historical content.
+> **Note on planning-phase artifacts.** `PLAN.md` and `docs/HANDOFF.md` were the orchestration artifacts that drove the WS0–WS8 planning phase; both are reachable in git history (final state at commit `54d7a0a`). In-prose citations elsewhere in this corpus that name `PLAN.md` or `HANDOFF` (with anchors such as `§WSN`, `§N.M`, `preamble`, or named bullet lists) refer to that historical content.
 
 ---
 
