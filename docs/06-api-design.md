@@ -461,15 +461,16 @@ The canonical write. Composition §4.1; gap-12 (intent classifier integration); 
 
 ```
 remember(
-  content:          string,
-  intent?:          enum,                    // caller-tagged; honored unless classifier objects ≥0.8
-  kind?:            enum,                    // gap-09 §3 shape hint; if absent classifier picks
-  idempotency_key:  uuidv7,                  // mandatory; §1.2
+  content:                 string,
+  intent?:                 enum,                    // caller-tagged; honored unless classifier objects ≥0.8
+  kind?:                   enum,                    // gap-09 §3 shape hint; if absent classifier picks
+  idempotency_key:         uuidv7,                  // mandatory; §1.2
   provenance: {
-    source_uri:     string,                  // mandatory; §1.5
-    agent_id?:      string,                  // defaults to principal
-    derived_from?:  string                   // optional; e.g. peer_message:msg_id
-  }
+    source_uri:            string,                  // mandatory; §1.5
+    agent_id?:             string,                  // defaults to principal
+    derived_from?:         string                   // optional; e.g. peer_message:msg_id
+  },
+  force_skip_classifier?:  bool                     // default false; tenant_admin-gated; bypasses step 3 on the escalate-review approval path. Ground truth: deployment §6.3.
 ) -> RememberResponse
 ```
 
@@ -499,6 +500,7 @@ remember(
 2. **Validate provenance** (§1.5) — refuse if `source_uri` missing.
 3. **Run intent classifier** (gap-12 §6) — heuristic-first; LLM-residual within the 200 ms budget.
    - Caller-supplied `intent` is honored only if classifier audit confidence is < 0.8 *against* the caller's tag (gap-12 §6 row 6).
+   - **Skip this step entirely if `force_skip_classifier=true`** — only callable by principals holding the `tenant_admin` capability; refuse with `403 forbidden` otherwise. The bypass is the escalate-review approval path (deployment §6.3) so a payload that previously escalated does not re-escalate on re-submission; an S5 `force_skip_classifier_used{episode_id, principal, staged_id?}` audit row is emitted.
 4. **Branch on class**:
    - `drop` / `reply_only` → `accepted=false`; **return immediately** with `ack="dropped"`. No S1/S2 write; the idempotency_key is recorded so retries are stable.
    - `escalate` → stage episode in S2 quarantine table; **return** with `ack="staged_for_review"`, status **422 classifier_escalate**.

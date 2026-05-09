@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Frame
+## §1. Frame
 
 PLAN.md poses the composition question as: *how do markdown, SQLite metadata, vector embeddings, temporal/graph indices, and a consolidation loop compose into one coherent runtime?* Not one paper or reference impl in the WS2 set has answered it cleanly — each optimizes one component (Graphiti optimizes the graph; Letta optimizes core/archival memory; qmd optimizes on-device hybrid retrieval; Cognitive Weave optimizes the scoring math; Karpathy's wiki optimizes human-legibility). Lethe's distinctive contribution is the **integration**, and integration begins with five questions:
 
@@ -35,7 +35,7 @@ Subsequent sections refer to "the API does not read S4b" — this is shorthand f
 
 ---
 
-## 2. Named stores — ownership matrix
+## §2. Named stores — ownership matrix
 
 Five stores. Each has one and only one canonical responsibility. Where two stores hold "the same" data, exactly one is authoritative and the other is derived.
 
@@ -62,7 +62,7 @@ This split is the resolution to topology choice §6 (hybrid layered).
 
 ---
 
-## 3. Read paths
+## §3. Read paths
 
 Read paths per MCP verb. Order matters: it determines the failure-mode degradation profile (§7).
 
@@ -115,7 +115,7 @@ WS6 owns the wire format of `preferences[]`; this section commits the mechanism.
 
 ---
 
-## 4. Write paths
+## §4. Write paths
 
 The write-path commitment (synthesis §1.3) is **fast synchronous + async consolidation**. The synchronous portion does the minimum to make the data durable and queryable; the async portion does the expensive extraction, scoring, merging.
 
@@ -179,7 +179,7 @@ The dream-daemon design note (§2.3, §2.10) covers cadence, gate logic, and sta
 
 ---
 
-## 5. Consistency model — explicit per store
+## §5. Consistency model — explicit per store
 
 The user prompt was specific: *do NOT punt on consistency; explicitly say where ACID is required and where it isn't, with rationale per store.* This is that section.
 
@@ -209,7 +209,7 @@ Tenant scope is a top-level partition on every store: Graphiti `group_id` (S1, b
 
 ---
 
-## 6. Provenance propagation
+## §6. Provenance propagation
 
 Provenance is a **type-system invariant** (charter §4.1; gap-05). Every fact ever returned by `recall` traces to an episode; every episode traces to a `remember` call with a caller-supplied source.
 
@@ -233,7 +233,7 @@ Peer messages get a *layered* provenance: the message episode carries `(from=pee
 
 ---
 
-## 7. Failure-mode analysis
+## §7. Failure-mode analysis
 
 Per the user's emphasis: WS6 (API) and WS7 (migration) lean on this most. The principle behind the analysis: **degrade, don't fail.** Each store has a defined down/stale/corrupted mode, and `recall` and `remember` have explicit fallback behavior for each.
 
@@ -266,7 +266,7 @@ These edge cases are noted here; WS6's health-endpoint design must surface them 
 
 ---
 
-## 8. Candidate topologies — evaluation
+## §8. Candidate topologies — evaluation
 
 The user prompt requires evaluating multiple candidates and recommending one. Three named candidates; trade-off table; recommendation.
 
@@ -344,7 +344,7 @@ The user prompt requires evaluating multiple candidates and recommending one. Th
 
 ---
 
-## 9. Component diagram
+## §9. Component diagram
 
 ```mermaid
 flowchart TB
@@ -408,7 +408,7 @@ flowchart TB
 
 ---
 
-## 10. Open seams handed to gap briefs
+## §10. Open seams handed to gap briefs
 
 Every unresolved decision in this document is delegated to a named gap brief. The composition design commits to *positions* on store ownership, R/W paths, and consistency, but does **not** answer:
 
@@ -433,7 +433,7 @@ These pointers are bidirectional: each gap brief should cite this document for t
 
 ---
 
-## 11. What this design does *not* commit to (deferred to downstream WS)
+## §11. What this design does *not* commit to (deferred to downstream WS)
 
 - **API verb signatures.** §3–§4 use named verbs; the parameter shapes, error codes, idempotency keys, and MCP schema are WS6.
 - **Scoring formulas.** §3.1 step 4 uses "weight tuple" as a placeholder; the math is WS5 + gap-03.
@@ -444,6 +444,6 @@ These pointers are bidirectional: each gap brief should cite this document for t
 
 ---
 
-## 12. Change log
+## §12. Change log
 
 - **2026-05-01** — initial WS3 Track A deliverable. Recommends Candidate C (hybrid layered).
