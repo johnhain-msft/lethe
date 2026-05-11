@@ -27,6 +27,8 @@ venv/
 
 # Coverage / tooling
 coverage/
+.coverage
+htmlcov/
 .nyc_output/
 
 # Local scratch

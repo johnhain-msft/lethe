@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lethe"
+version = "0.0.1"
+description = "Lethe — bi-temporal memory substrate (v1)"
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{ name = "John Hain" }]
+dependencies = [
+    "graphiti-core>=0.3,<1.0",
+    "sqlite-vec>=0.1.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+lethe-audit = "lethe.audit.integrity:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lethe"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+files = ["src/lethe"]
+python_version = "3.11"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: requires external services (e.g. Graphiti backend); excluded by default",
+]

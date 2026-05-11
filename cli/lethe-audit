@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Thin shim mirroring the ``[project.scripts]`` entry-point.
+
+``docs/IMPLEMENTATION.md`` §2.1 lists ``cli/lethe-audit`` literally; the
+body delegates to :func:`lethe.audit.integrity.main` (lands in P1 commit 4).
+"""
+
+from __future__ import annotations
+
+from lethe.audit.integrity import main
+
+raise SystemExit(main())
