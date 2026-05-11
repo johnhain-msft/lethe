@@ -22,12 +22,27 @@ def test_lethe_api_import_raises() -> None:
 
 
 def test_top_level_lethe_does_not_import_api() -> None:
-    # Force a clean state.
-    for mod in list(sys.modules):
-        if mod == "lethe" or mod.startswith("lethe."):
-            del sys.modules[mod]
-    importlib.import_module("lethe")
-    assert "lethe.api" not in sys.modules, (
-        "Top-level `import lethe` must not pull in lethe.api; the api lock "
-        "would otherwise fire on every consumer (see plan.md §B5)."
-    )
+    # Snapshot current lethe.* modules; we restore them on exit so we don't
+    # leave subsequent tests holding stale module references (the test file's
+    # top-level imports of lethe.audit.* are cached and would otherwise point
+    # to a different module instance than sys.modules['lethe.audit.integrity']
+    # after this test finishes).
+    saved = {
+        name: mod
+        for name, mod in sys.modules.items()
+        if name == "lethe" or name.startswith("lethe.")
+    }
+    try:
+        for mod in list(sys.modules):
+            if mod == "lethe" or mod.startswith("lethe."):
+                del sys.modules[mod]
+        importlib.import_module("lethe")
+        assert "lethe.api" not in sys.modules, (
+            "Top-level `import lethe` must not pull in lethe.api; the api lock "
+            "would otherwise fire on every consumer (see plan.md §B5)."
+        )
+    finally:
+        for mod in list(sys.modules):
+            if mod == "lethe" or mod.startswith("lethe."):
+                del sys.modules[mod]
+        sys.modules.update(saved)
