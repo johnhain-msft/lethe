@@ -1,12 +1,32 @@
-"""Lethe MCP verb surface — locked at P1.
+"""Lethe MCP verb surface.
 
-No api verb is exposed at P1 (per ``docs/IMPLEMENTATION.md`` §2.1 exit gate).
-Importing this package raises ``NotImplementedError`` by design; the verbs
-land in P2 (``remember``), P3 (``recall``, ``recall_synthesis``), P5
-(``promote``, ``forget``), and P6 (peer-messaging + admin/ops).
+P2 lands :func:`remember` (api §3.1). Other verbs land in later phases:
+P3 (``recall``, ``recall_synthesis``), P5 (``promote``, ``forget``), P6
+(peer-messaging + admin/ops). Importing this package no longer raises;
+the IMPL §2.1 P1 exit gate is satisfied by the runtime tenant-init smoke
+landing at P1, not by import-time NotImplementedError.
 """
 
-raise NotImplementedError(
-    "lethe.api verbs land in P2+; importing this package at P1 is "
-    "intentionally an error (see docs/IMPLEMENTATION.md §2.1 exit gates)."
+from __future__ import annotations
+
+from lethe.api.remember import (
+    RememberAuthError,
+    RememberConflictError,
+    RememberError,
+    RememberPeerRouteError,
+    RememberRequest,
+    RememberResponse,
+    RememberValidationError,
+    remember,
 )
+
+__all__ = [
+    "RememberAuthError",
+    "RememberConflictError",
+    "RememberError",
+    "RememberPeerRouteError",
+    "RememberRequest",
+    "RememberResponse",
+    "RememberValidationError",
+    "remember",
+]
