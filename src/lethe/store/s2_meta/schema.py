@@ -1,20 +1,23 @@
 """S2 schema: 10 named tables (IMPL §2.1) + the S5 consolidation log table.
 
-Column shapes are intentionally minimal at P1. The 10 table NAMES are pinned
-by ``docs/IMPLEMENTATION.md`` §2.1; concrete column shapes evolve via
-:mod:`lethe.store.s2_meta.migrations` as each table's owning verb lands
-(P2 → ``recall_ledger`` / ``idempotency_keys``; P4 → ``consolidation_state``
-/ ``scoring_weight_overrides``; P5 → ``promotion_flags``; P7 → ``review_queue``;
-P8 → ``audit_log``; etc.).
+Column shapes evolve via :mod:`lethe.store.s2_meta.migrations` as each
+table's owning verb lands. Schema version history:
 
-Two tables ARE shaped at P1 because their shapes are pinned by canonical docs:
+- v1 (P1): ``review_queue`` + ``idempotency_keys`` shaped; six other named
+  tables (``recall_ledger``, ``utility_events``, ``promotion_flags``,
+  ``consolidation_state``, ``extraction_log``, ``audit_log``) ship as
+  ``(id, created_at)`` stubs; ``tenant_config`` + ``scoring_weight_overrides``
+  are key-value.
+- v2 (P2): ``extraction_log`` columned per gap-06 minimal scaffold;
+  ``audit_log`` columned for the ``force_skip_classifier_invoked`` row
+  (deployment §6.3 + facilitator P2 sub-plan §6).
 
-- ``review_queue`` per ``docs/08-deployment-design.md`` §6.2.
-- ``idempotency_keys`` per api §1.2 + invariant I-5 (24 h TTL default; 7-day
-  enforced ceiling) + gap-08 §5.
+Future: P4 → ``consolidation_state``; P5 → ``promotion_flags`` +
+``recall_ledger`` extensions; P7 → review_queue indexes; etc.
 
-All other tables get a minimal ``(id, created_at)`` stub. A ``meta_version``
-sentinel row tracks schema version so :mod:`.migrations` can ratchet forward.
+A ``meta_version`` sentinel row tracks schema version so :mod:`.migrations`
+can ratchet existing databases forward without dropping data on already-shaped
+tables.
 """
 
 from __future__ import annotations
@@ -40,16 +43,18 @@ S2_TABLE_NAMES: tuple[str, ...] = (
 # S5 lives inside the S2 file (facilitator §(g) lock) — single-DB T2 txn.
 S5_LOG_TABLE_NAME = "s5_consolidation_log"
 
-# Tables that get a minimal `(id, created_at)` stub at P1. See module docstring
+# Tables that still get a minimal `(id, created_at)` stub. See module docstring
 # for why we don't speculate on real columns yet.
+#
+# P2 columns ``extraction_log`` (per gap-06; minimal scaffold so P3+ doesn't
+# need a re-migration) and ``audit_log`` (per deployment §6.3 + api §3.1
+# ``force_skip_classifier=true`` audit row), so both are dropped from this set.
 _STUB_TABLES: frozenset[str] = frozenset(
     {
         "recall_ledger",
         "utility_events",
         "promotion_flags",
         "consolidation_state",
-        "extraction_log",
-        "audit_log",
     }
 )
 
@@ -117,6 +122,35 @@ _DDL_IDEMPOTENCY_KEYS = (
     ")"
 )
 
+# extraction_log: P2 minimal scaffold per facilitator plan §(c) closing line.
+# gap-06 owns extraction-confidence semantics; this shape is the seam P3+
+# extraction wire-up consumes without needing a re-migration.
+_DDL_EXTRACTION_LOG = (
+    "CREATE TABLE IF NOT EXISTS extraction_log ("
+    " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    " episode_id TEXT NOT NULL,"
+    " extracted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    " extractor_version TEXT NOT NULL,"
+    " confidence REAL NOT NULL,"
+    " payload_blob BLOB NOT NULL"
+    ")"
+)
+
+# audit_log: P2 minimal columns per facilitator plan §6 (sub-plan).
+# Records the `force_skip_classifier_invoked` row at P2; deployment §6.3's
+# `review_approved{...}` row has its own column shape and lands at P7.
+_DDL_AUDIT_LOG = (
+    "CREATE TABLE IF NOT EXISTS audit_log ("
+    " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    " created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
+    " tenant_id TEXT NOT NULL,"
+    " verb TEXT NOT NULL,"
+    " principal TEXT NOT NULL,"
+    " action TEXT NOT NULL,"
+    " payload_json TEXT NOT NULL"
+    ")"
+)
+
 # S5 consolidation log (lives inside S2 per facilitator §(g) lock).
 _DDL_S5_LOG = (
     f"CREATE TABLE IF NOT EXISTS {S5_LOG_TABLE_NAME} ("
@@ -174,12 +208,16 @@ class S2Schema:
                 conn.execute(_DDL_REVIEW_QUEUE)
             elif name == "idempotency_keys":
                 conn.execute(_DDL_IDEMPOTENCY_KEYS)
+            elif name == "extraction_log":
+                conn.execute(_DDL_EXTRACTION_LOG)
+            elif name == "audit_log":
+                conn.execute(_DDL_AUDIT_LOG)
             else:
                 # Defensive: if a name is added to S2_TABLE_NAMES without a
                 # matching DDL branch, fail loudly rather than silently drop.
                 raise RuntimeError(f"S2 table {name!r} has no DDL branch")
         conn.execute(_DDL_S5_LOG)
         conn.execute(
-            "INSERT OR REPLACE INTO _lethe_meta(key, value) VALUES ('schema_version', '1')"
+            "INSERT OR REPLACE INTO _lethe_meta(key, value) VALUES ('schema_version', '2')"
         )
         return conn
