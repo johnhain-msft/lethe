@@ -25,6 +25,8 @@ transport-surface concern).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -36,11 +38,34 @@ import graphiti_core  # noqa: F401  (eagerness is the point; symbol is unused)
 from lethe.store.s1_graph.schema import BASELINE_ENTITY_TYPES
 
 
+@dataclass(frozen=True)
+class EpisodeRecord:
+    """One episode as surfaced to the consolidate-loop extract phase (P4 C5).
+
+    Fields verbatim-mirror :meth:`GraphBackend.add_episode` kwargs so
+    materializing one from the backend's stored shape is a 5-field copy.
+
+    Frozen dataclass at the Protocol layer mirrors the
+    :class:`~lethe.runtime.classifier.intent_classifier.LLMClassification`
+    posture (Protocol-return frozen dataclasses; immutable + mypy-strict
+    friendly + ``dataclasses.FrozenInstanceError`` semantics on accidental
+    mutation).
+    """
+
+    episode_id: str
+    body: str
+    source_uri: str
+    ts_recorded: str
+    intent: str
+
+
 class GraphBackend(Protocol):
     """Minimum surface S1 needs from any backing graph store.
 
-    Episode insert lands at P2 (write path). Fact extraction lands at P5
-    with the dream-daemon.
+    Episode insert lands at P2 (write path). Episode read for the
+    consolidate extract phase lands at P4 commit 5 via
+    :meth:`episodes_since`. Fact extraction lands at P5 with the
+    dream-daemon.
     """
 
     def bootstrap_tenant(self, group_id: str) -> None:
@@ -71,6 +96,33 @@ class GraphBackend(Protocol):
         ``intent`` is the gap-12 §3 classification class — backends MAY
         ignore it (graphiti-core does not consume it natively) but the
         Lethe-side ledger needs it on the wire for §7 emit-point parity.
+        """
+        ...
+
+    def episodes_since(
+        self,
+        *,
+        group_id: str,
+        since_cursor: str | None,
+    ) -> Iterable[EpisodeRecord]:
+        """Yield episodes stored after ``since_cursor`` (P4 commit 5 — extract).
+
+        ``since_cursor`` is the **composite cursor** persisted in
+        ``consolidation_state.last_run_cursor`` of the form
+        ``f"{ts_recorded}\\t{episode_id}"`` (tab-separated). When ``None``
+        every episode in the tenant is yielded (first run after migration).
+        Otherwise the boundary semantics are STRICT inequality: an episode
+        is yielded iff
+        ``f"{episode.ts_recorded}\\t{episode.episode_id}" > since_cursor``
+        in lexicographic compare. The composite key disambiguates episodes
+        that share a ``ts_recorded`` value (otherwise the second of two
+        same-timestamp episodes would be permanently skipped).
+
+        Returned episodes are sorted ASC by
+        ``(ts_recorded, episode_id)`` tuple — the same order the cursor
+        compares against. The caller (``runtime.consolidate.extract``)
+        relies on this ordering to compute the next cursor as the LAST
+        materialized element after the loop, not ``max()`` over the list.
         """
         ...
 
@@ -138,8 +190,7 @@ class _InMemoryGraphBackend:
             # Mirror graphiti's "group_id must exist" contract — fail
             # loudly rather than silently create a tenant.
             raise ValueError(
-                f"_InMemoryGraphBackend.add_episode: tenant {group_id!r} "
-                "has not been bootstrapped"
+                f"_InMemoryGraphBackend.add_episode: tenant {group_id!r} has not been bootstrapped"
             )
         self._episodes.setdefault(group_id, []).append(
             {
@@ -157,6 +208,35 @@ class _InMemoryGraphBackend:
 
     def _episodes_for(self, group_id: str) -> tuple[dict[str, str], ...]:
         return tuple(self._episodes.get(group_id, []))
+
+    def episodes_since(
+        self,
+        *,
+        group_id: str,
+        since_cursor: str | None,
+    ) -> Iterable[EpisodeRecord]:
+        """Materialize :class:`EpisodeRecord` instances strictly after ``since_cursor``.
+
+        Sort key + cursor compare are
+        ``f"{ts_recorded}\\t{episode_id}"`` (composite cursor — see
+        :meth:`GraphBackend.episodes_since`). Returns a list (eagerly
+        materialized) so callers can compute ``len()`` and ``[-1]``
+        without re-iterating.
+        """
+        records = [
+            EpisodeRecord(
+                episode_id=ep["episode_id"],
+                body=ep["body"],
+                source_uri=ep["source_uri"],
+                ts_recorded=ep["ts_recorded"],
+                intent=ep["intent"],
+            )
+            for ep in self._episodes.get(group_id, [])
+        ]
+        records.sort(key=lambda r: (r.ts_recorded, r.episode_id))
+        if since_cursor is None:
+            return records
+        return [r for r in records if f"{r.ts_recorded}\t{r.episode_id}" > since_cursor]
 
 
 class GraphitiBackend:
@@ -182,9 +262,7 @@ class GraphitiBackend:
 
     def _live_client(self) -> graphiti_core.Graphiti:
         if self._client is None:
-            self._client = graphiti_core.Graphiti(
-                self._uri, self._user, self._password
-            )
+            self._client = graphiti_core.Graphiti(self._uri, self._user, self._password)
         return self._client
 
     def bootstrap_tenant(self, group_id: str) -> None:  # pragma: no cover - P7
@@ -237,6 +315,17 @@ class GraphitiBackend:
             )
         )
 
+    def episodes_since(  # pragma: no cover - P7
+        self,
+        *,
+        group_id: str,
+        since_cursor: str | None,
+    ) -> Iterable[EpisodeRecord]:
+        raise NotImplementedError(
+            "GraphitiBackend.episodes_since wires in at P7 alongside the "
+            "live Neo4j/FalkorDB read path (P4 commit 5 — sub-plan §j.1)"
+        )
+
 
 class S1Client:
     """Thin façade over a :class:`GraphBackend`, scoped to a single tenant.
@@ -269,3 +358,20 @@ class S1Client:
 
     def is_ready(self) -> bool:
         return self._bootstrapped and self._backend.health()
+
+    def episodes_since(
+        self,
+        *,
+        since_cursor: str | None,
+    ) -> Iterable[EpisodeRecord]:
+        """Yield this tenant's episodes strictly after ``since_cursor``.
+
+        Façade over :meth:`GraphBackend.episodes_since` that pins
+        ``group_id`` to ``self._tenant_id``. Per A3 (P4 C5 amendment),
+        this exists so callers don't need to thread the
+        tenant_id/group_id consistency by hand.
+        """
+        return self._backend.episodes_since(
+            group_id=self._tenant_id,
+            since_cursor=since_cursor,
+        )
