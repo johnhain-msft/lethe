@@ -360,3 +360,43 @@ def test_promote_does_not_touch_s1_valid_to(lethe_home: Path) -> None:
         f"promote unexpectedly stamped S1 valid_to={rec.valid_to!r}; "
         f"promote is an S2-only event (composition §1 row 48 + §c)"
     )
+
+
+# ---------- C7 APPEND per IMPLEMENT 7 — gate 25 + A1 lock-columns native ---------- #
+
+
+def test_consolidation_state_lock_columns_after_acquire_are_native(
+    lethe_home: Path,
+) -> None:
+    """Gate 25: after :func:`acquire_lock`, the lock columns
+    (``lock_token``, ``lock_acquired_at``, ``lock_heartbeat_at``) are
+    native ISO strings — NOT bi-temporal ``valid_from`` / ``valid_to``.
+    Per A1 the ``last_run_at`` column stays NULL on a bare acquire (no
+    successful run yet); only ``mark_success_and_release`` advances it.
+    """
+    from datetime import UTC, datetime
+
+    from lethe.runtime.consolidate import acquire_lock
+
+    _bootstrap(lethe_home)
+    tenant_root = lethe_home / "tenants" / "smoke-tenant"
+    fixed_now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+    token = acquire_lock(tenant_id="smoke-tenant", tenant_root=tenant_root, now=fixed_now)
+
+    with shared_store_connection(tenant_root) as conn:
+        cols = _columns(conn, "main.consolidation_state")
+        assert BITEMPORAL_COLS.isdisjoint(cols), (
+            f"consolidation_state unexpectedly has bi-temporal cols after acquire: "
+            f"{cols & BITEMPORAL_COLS}"
+        )
+        row = conn.execute(
+            "SELECT lock_token, lock_acquired_at, lock_heartbeat_at, last_run_at "
+            "FROM main.consolidation_state WHERE tenant_id = 'smoke-tenant'"
+        ).fetchone()
+    assert row is not None
+    lock_token, lock_acquired_at, lock_heartbeat_at, last_run_at = row
+    assert lock_token == token
+    assert isinstance(lock_acquired_at, str) and lock_acquired_at.endswith("Z")
+    assert isinstance(lock_heartbeat_at, str) and lock_heartbeat_at.endswith("Z")
+    # Per A1: bare acquire does NOT advance last_run_at
+    assert last_run_at is None

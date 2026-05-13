@@ -840,3 +840,38 @@ def test_invalidate_does_not_insert_into_utility_events(lethe_home: Path) -> Non
 
 
 # ---------- gate 21 (audit) lives outside this file (grep gate). ---------- #
+
+
+# ---------- C7 APPEND per IMPLEMENT 7 amendment A4 — canonical I-11 order ---------- #
+
+
+def test_phase_dispatch_table_matches_canonical_order() -> None:
+    """Gate 15 (A4): PHASE_DISPATCH order matches canonical I-11 order.
+
+    Per IMPLEMENT 7 amendment A4: this test asserts (a) tuple equality
+    against the literal canonical order from IMPL §2.4 invariant I-11,
+    (b) frozenset membership equality against
+    ``events.py:_VALID_CONSOLIDATE_PHASES`` (which is a frozenset and
+    therefore unordered — the canonical ORDER lives only in
+    PHASE_DISPATCH here), and (c) that PHASE_DISPATCH itself is a
+    tuple (immutable). MUST NOT reference ``_VALID_CONSOLIDATE_PHASES_ORDER``
+    — that constant does not exist; events.py is held at 0 lines diff
+    vs origin/main per §7.11.
+    """
+    from lethe.runtime.consolidate.phases import PHASE_DISPATCH
+    from lethe.runtime.events import _VALID_CONSOLIDATE_PHASES
+
+    names = tuple(name for name, _ in PHASE_DISPATCH)
+    # (a) Canonical I-11 order from IMPL §2.4
+    assert names == (
+        "extract",
+        "score",
+        "promote",
+        "demote",
+        "consolidate",
+        "invalidate",
+    )
+    # (b) Frozenset membership equality — events.py owns set, this owns order
+    assert set(names) == _VALID_CONSOLIDATE_PHASES
+    # (c) PHASE_DISPATCH is an immutable tuple
+    assert isinstance(PHASE_DISPATCH, tuple)
