@@ -28,10 +28,10 @@ Public surface (planned)
 from __future__ import annotations
 
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 
-def load(snapshot_id: str | None = None) -> Iterable["object"]:
+def load(snapshot_id: str | None = None) -> Iterable[object]:
     """Yield LongMemEval cases mapped to the common Case schema.
 
     Wired but inert. See module docstring.

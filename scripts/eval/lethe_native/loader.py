@@ -48,10 +48,10 @@ Public surface (planned)
 from __future__ import annotations
 
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 
-def load(snapshot_id: str, epoch: str = "v1.0") -> Iterable["object"]:
+def load(snapshot_id: str, epoch: str = "v1.0") -> Iterable[object]:
     """Yield Lethe-native Case objects for the snapshot. Wired but inert."""
     raise NotImplementedError(
         "lethe_native.loader.load is a WS4 skeleton stub; "
@@ -59,7 +59,7 @@ def load(snapshot_id: str, epoch: str = "v1.0") -> Iterable["object"]:
     )
 
 
-def composition_stats(cases: Iterable["object"]) -> dict:
+def composition_stats(cases: Iterable[object]) -> dict:
     """Return per-source-class case counts and ratios. Wired but inert."""
     raise NotImplementedError(
         "lethe_native.loader.composition_stats is a WS4 skeleton stub"

@@ -24,12 +24,12 @@ Public surface (planned)
 from __future__ import annotations
 
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def load(
     variant: str = "locomo", snapshot_id: str | None = None
-) -> Iterable["object"]:
+) -> Iterable[object]:
     """Yield LoCoMo / LoCoMo-Plus cases. Wired but inert."""
     raise NotImplementedError(
         "adapters.locomo.load is a WS4 skeleton stub; "

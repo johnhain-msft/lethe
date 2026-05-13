@@ -36,19 +36,60 @@ Exit codes:
 """
 from __future__ import annotations
 
+import argparse
 import sys
+from pathlib import Path
+
+# Path-style invocation (`python scripts/eval/run_eval.py …`) puts only
+# this script's directory on ``sys.path``, so ``from scripts.eval...``
+# imports break. Inject the repo root explicitly so the harness behaves
+# the same whether invoked as a path, ``-m scripts.eval.run_eval``, or
+# from a parent test that already has the repo on ``sys.path``.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+
+def _run_dmr(tenant_id: str) -> int:
+    """Dispatch to the DMR sanity-replay adapter (P3 §2.3 exit gate)."""
+    # Local import: keeps the WS4 inert default cheap and avoids dragging
+    # sqlite-vec / FTS5 into a no-args invocation.
+    from scripts.eval.adapters.dmr import run_sanity_replay
+
+    result = run_sanity_replay(tenant_id=tenant_id)
+    print(result.summary_line())
+    return 0 if result.passed else 1
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point. Will parse args and dispatch; today returns inert.
+    """Entry point. Dispatch on ``--adapter``; defaults to the WS4 inert path.
 
-    Wired but inert. See module docstring for the contract this fulfills.
+    P3 wires only ``--adapter dmr`` (sanity-replay). The rest of the WS4
+    surface remains inert (exit 2) until those workstreams land.
     """
-    raise NotImplementedError(
-        "run_eval.main is a WS4 skeleton stub; see docs/04-eval-plan.md §10"
+    parser = argparse.ArgumentParser(prog="scripts.eval.run_eval", add_help=True)
+    parser.add_argument(
+        "--adapter",
+        choices=["dmr"],
+        default=None,
+        help="P3: only 'dmr' is wired; selects the §2.3 sanity-replay adapter.",
     )
+    parser.add_argument(
+        "--tenant-id",
+        default="dmr-smoke",
+        help="Tenant id used for the adapter's per-run temp store.",
+    )
+    args, _unknown = parser.parse_known_args(argv)
+
+    if args.adapter == "dmr":
+        return _run_dmr(args.tenant_id)
+
+    # No adapter selected → preserve the WS4 inert behaviour (the rest of
+    # the harness — public-benchmark loaders, metrics emitter, shadow,
+    # chaos, contamination — has not landed yet).
+    print("scripts.eval.run_eval: not implemented (WS4 stub)", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
-    print("scripts.eval.run_eval: not implemented (WS4 stub)", file=sys.stderr)
-    sys.exit(2)
+    sys.exit(main(sys.argv[1:]))
