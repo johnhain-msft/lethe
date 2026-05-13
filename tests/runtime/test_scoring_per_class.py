@@ -64,9 +64,7 @@ def test_shape_for_kind_persistent(kind: str, expected: str) -> None:
     assert shape_for_kind(kind) == expected
 
 
-@pytest.mark.parametrize(
-    "kind", ["reply_only", "peer_route", "drop", "escalate"]
-)
+@pytest.mark.parametrize("kind", ["reply_only", "peer_route", "drop", "escalate"])
 def test_shape_for_kind_non_persistent_raises(kind: str) -> None:
     with pytest.raises(NonPersistentClass):
         shape_for_kind(kind)
@@ -88,6 +86,9 @@ def test_type_priority_table_matches_spec() -> None:
         "preference": 0.85,
         "user_fact": 0.70,
         "feedback": 0.55,
+        # P4 C9 closure of residual-unknown #6 (scoring §A.1:553 + §10:495):
+        # procedure adopts the feedback tier in v1.
+        "procedure": 0.55,
         "narrative": 0.50,
         "project_fact": 0.40,
         "reference": 0.25,
@@ -142,9 +143,7 @@ def test_episodic_fact_eps_cap_is_050() -> None:
     )
     rec = 0.05 + 0.95 * math.exp(-1 / 30)
     expected_eps_eff = eps_effective(eps=0.50, contradiction_count=2)
-    expected = (
-        0.2 * 0.70 + 0.30 * rec + 0.20 * 0.0 + 0.40 * 0.0 - expected_eps_eff * 1.0
-    )
+    expected = 0.2 * 0.70 + 0.30 * rec + 0.20 * 0.0 + 0.40 * 0.0 - expected_eps_eff * 1.0
     assert s_capped == pytest.approx(expected, rel=1e-9)
 
 
@@ -213,7 +212,10 @@ def test_procedure_uses_180_day_tau_r() -> None:
     epi_rec = recency(t_now=NOW, t_access=t_access, tau_days=30.0)
     assert proc_rec > epi_rec  # slower decay
 
-    # type_priority for "procedure" is unknown → DEFAULT_TYPE_PRIORITY (0.30)
+    # P4 C9: type_priority for "procedure" is the feedback tier (0.55).
+    # Closes residual-unknown #6 (scoring §A.1:553 + §10:495); gap-15 may
+    # re-tune at P5+. Note: previously fell back to DEFAULT_TYPE_PRIORITY
+    # (0.30) — the +0.05 lift flows through alpha=0.2 here.
     s = score(
         kind="procedure",
         t_now=NOW,
@@ -223,7 +225,7 @@ def test_procedure_uses_180_day_tau_r() -> None:
         contradiction_count=0,
         gravity_value=0.0,
     )
-    expected = 0.2 * 0.30 + 0.30 * proc_rec
+    expected = 0.2 * 0.55 + 0.30 * proc_rec
     assert s == pytest.approx(expected, rel=1e-9)
 
 
@@ -344,6 +346,4 @@ def test_score_rejects_non_persistent_kind() -> None:
 
 
 def test_default_weights_match_gap03_candidate_a() -> None:
-    assert WeightTuple(
-        alpha=0.2, beta=0.3, gamma=0.2, delta=0.4, eps=0.5
-    ) == DEFAULT_WEIGHTS
+    assert WeightTuple(alpha=0.2, beta=0.3, gamma=0.2, delta=0.4, eps=0.5) == DEFAULT_WEIGHTS

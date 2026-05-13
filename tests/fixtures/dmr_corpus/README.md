@@ -95,8 +95,8 @@ Rationale (also in the test docstring):
   facts; the semantic (sqlite-vec cosine) path adds a deterministic
   secondary signal and exercises the full retriever protocol.
 - The floor is intentionally below the implementation's measured value
-  (current run: `recall@5 = 1.00`) so a small regression doesn't fail the
-  gate, but a substantive read-path break does.
+  (current run, P4 C7→C8 bit-identical: `recall@5 = 0.720`) so a small
+  regression doesn't fail the gate, but a substantive read-path break does.
 
 ## Regenerating the fixture
 

@@ -77,6 +77,10 @@ TYPE_PRIORITY: Final[dict[str, float]] = {
     "preference": 0.85,
     "user_fact": 0.70,
     "feedback": 0.55,
+    # P4 C9 closure of residual-unknown #6 (scoring §A.1:553 + §10:495):
+    # procedure adopts the feedback tier (0.55) — provisional in v1; gap-15
+    # may re-tune at P5+ once operator-trace data is available.
+    "procedure": 0.55,
     "narrative": 0.50,
     "project_fact": 0.40,
     "reference": 0.25,
@@ -110,12 +114,8 @@ _PARAMS_BY_SHAPE: Final[dict[PersistentShape, ClassParams]] = {
     "preference": ClassParams(
         shape="preference", tau_r_days=30.0, beta_override=0.00, eps_cap=0.30
     ),
-    "procedure": ClassParams(
-        shape="procedure", tau_r_days=180.0, beta_override=0.30, eps_cap=0.50
-    ),
-    "narrative": ClassParams(
-        shape="narrative", tau_r_days=30.0, beta_override=0.00, eps_cap=0.50
-    ),
+    "procedure": ClassParams(shape="procedure", tau_r_days=180.0, beta_override=0.30, eps_cap=0.50),
+    "narrative": ClassParams(shape="narrative", tau_r_days=30.0, beta_override=0.00, eps_cap=0.50),
 }
 
 

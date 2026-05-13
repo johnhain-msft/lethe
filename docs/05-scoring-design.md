@@ -550,7 +550,7 @@ Items WS5 commits to *naming* but not closing in v1:
 - **`score(f_fact) = 0.397`**. → **retain**.
 
 **`f_proc`** (procedure; `τ_r = 180`):
-- `type_priority = 0.55` (procedures aren't in §3.4; treat as `feedback` tier in v1; **residual unknown #6**).
+- `type_priority = 0.55` (procedures aren't in §3.4; treat as `feedback` tier in v1 — P4 C9 closes residual-unknown #6 via `TYPE_PRIORITY["procedure"] = 0.55`; gap-15 may re-tune at P5+).
 - `recency = 0.05 + 0.95·exp(−61/180) ≈ 0.05 + 0.95·0.713 ≈ 0.73`.
 - `connectedness = 0.30` (procedure-seq graph).
 - `utility = 0.4·1·exp(−61/30) ≈ 0.4·0.130 ≈ 0.052`. Normalize: `≈ 0.013`.
