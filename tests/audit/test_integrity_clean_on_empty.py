@@ -66,9 +66,11 @@ def test_main_dirty_exits_one(
     assert "smoke-failing-lint" in captured.out
 
 
-def test_registry_starts_empty_at_p1() -> None:
-    """P1 invariant: no concrete lints registered yet (P2/P5/P8 add them)."""
-    assert REGISTRY.names() == ()
+def test_registry_has_p2_provenance_lints() -> None:
+    """P2 commit-5 invariant: provenance lints are registered."""
+    names = REGISTRY.names()
+    assert "provenance-required" in names
+    assert "provenance-resolvable" in names
 
 
 def test_lint_integrity_rejects_empty_tenant_id(lethe_home: Path) -> None:

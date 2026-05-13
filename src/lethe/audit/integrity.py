@@ -64,6 +64,19 @@ class LintRegistry:
 # owning packages are wired in later phases.
 REGISTRY = LintRegistry()
 
+# P2: register provenance lints (gap-05 §3.5 + §6). Import is deferred to the
+# bottom of the function to avoid a circular import — the lints package imports
+# nothing from this module at runtime, but keeping the registration call after
+# REGISTRY construction guards against future refactors that might introduce
+# one.
+def _register_p2_lints() -> None:
+    from lethe.audit.lints import register_p2_lints
+
+    register_p2_lints(REGISTRY)
+
+
+_register_p2_lints()
+
 
 def _lethe_home() -> Path:
     home_env = os.environ.get("LETHE_HOME")
