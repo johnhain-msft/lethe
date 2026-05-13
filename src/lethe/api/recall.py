@@ -35,9 +35,21 @@ The 11-step api §2.1 algorithm:
 6. **RRF combine** — fuse the three filtered ranked lists (rrf_k=60).
 7. **Per-class score** — dispatch each fused candidate through
    ``per_class.score`` using its declared formula (D1; all 4 persistent
-   shapes). RRF rank feeds the connectedness term as a normalized
-   proxy at P3; full PPR-derived connectedness wires when the live
-   graph backend lands (P4+).
+   shapes). When ``s1_client`` is supplied, the connectedness term is
+   the real
+   :func:`lethe.runtime.scoring.connectedness.connectedness` computed
+   against the live S1 2-hop adjacency around each fact (P4 C8). When
+   ``s1_client`` is ``None`` the term degrades to the P3 RRF-rank
+   proxy (see :func:`_score_one`) so DMR sanity replay and other
+   no-graph callers retain meaningful ordering (cleanup scheduled
+   for P9+ alongside real fact-extraction).
+   **Determinism note:** when ``s1_client`` is supplied, the
+   response_envelope is a function of (request, ts_recorded, S1
+   adjacency state at call time); two replays of the same
+   ``recall_id`` against a mutated graph WILL diverge and surface
+   as :class:`RecallLedgerCorruption`. The api §1.4 determinism
+   contract narrows accordingly. Snapshot/replay support is a P5+
+   erratum.
 8. **Truncate to top-k** — sort by per-class score descending, take
    the first ``k``.
 9. **Provenance enforcement** — drop facts whose metadata lacks an
@@ -98,8 +110,10 @@ from lethe.runtime.retrievers import (
     semantic_topk as _semantic_topk,
 )
 from lethe.runtime.retrievers.rrf import rrf_combine
+from lethe.runtime.scoring.connectedness import connectedness as compute_connectedness
 from lethe.runtime.scoring.per_class import DEFAULT_WEIGHTS
 from lethe.runtime.scoring.per_class import score as per_class_score
+from lethe.store.s1_graph.client import S1Client
 
 _VERB_NAME: Final[str] = "recall"
 
@@ -191,9 +205,7 @@ class FactStore(Protocol):
     the verb's own :func:`filter_facts` call).
     """
 
-    def fetch_many(
-        self, fact_ids: Sequence[str], *, t_now: datetime
-    ) -> list[FactRecord]: ...
+    def fetch_many(self, fact_ids: Sequence[str], *, t_now: datetime) -> list[FactRecord]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +225,10 @@ class RecallRequest:
     There is no ``idempotency_key`` field: ``recall_id`` is itself the
     deterministic replay key (api §1.4), so a separate idempotency key
     would be redundant. Identical inputs produce the identical
-    response_envelope, persisted under the same recall_id.
+    response_envelope, persisted under the same recall_id. When
+    ``s1_client`` is supplied to :func:`recall`, the determinism
+    guarantee additionally requires stable S1 adjacency between
+    replays of the same ``recall_id`` (P4 C8).
     """
 
     tenant_id: str
@@ -492,9 +507,7 @@ def emit_recall_events(
 # ---------------------------------------------------------------------------
 
 
-def _filter_hits_by_kept_ids(
-    hits: Sequence[Hit], *, kept_ids: frozenset[str]
-) -> list[Hit]:
+def _filter_hits_by_kept_ids(hits: Sequence[Hit], *, kept_ids: frozenset[str]) -> list[Hit]:
     """Drop hits whose fact_id is not in ``kept_ids`` and renumber rank.
 
     Rank renumbering is contiguous (1, 2, 3, ...) so the RRF combine
@@ -531,9 +544,7 @@ def _retrieve_per_source(
     semantic_hits: list[Hit] = []
     if semantic is not None and query_vec is not None:
         try:
-            semantic_hits = _semantic_topk(
-                backend=semantic, query_vec=query_vec, k=k_per_retriever
-            )
+            semantic_hits = _semantic_topk(backend=semantic, query_vec=query_vec, k=k_per_retriever)
             store_health["s3_used"] = True
         except S3Outage:
             store_health["degraded"] = True
@@ -553,15 +564,28 @@ def _score_one(
     rrf_score: float,
     rrf_max: float,
     t_now: datetime,
+    s1_client: S1Client | None,
 ) -> tuple[float, dict[str, float]]:
     """Run one fused candidate through the per-class scorer.
 
-    The connectedness term consumes a normalized RRF rank-score proxy
-    at P3 (RRF score / max RRF score), keeping the term in [0, 1] as
-    per_class.score requires. Live PPR-derived connectedness lands at
-    P4+ when the production graph backend wires in. utility / gravity
-    inputs default to 0.0 because P3 has no utility-event ledger or
-    gravity store yet (D5).
+    When ``s1_client`` is supplied, the connectedness term is computed
+    via :func:`lethe.runtime.scoring.connectedness.connectedness`
+    against the live S1 2-hop adjacency around ``record.fact_id``
+    (P4 C8 wire-in).
+
+    When ``s1_client`` is ``None``, the connectedness term degrades to
+    the P3 RRF-rank proxy ``(rrf_score / rrf_max)`` so callers without
+    live graph data (DMR sanity replay; many P3-era unit tests) retain
+    a statistically meaningful per-class ordering. This fallback is
+    scheduled for removal at P9+ when real fact-extraction lands
+    (gap-06) and every recall path has live graph data — at that point
+    the branch collapses to 0.0 or ``s1_client`` becomes mandatory.
+
+    The ``connectedness_value`` key remains present in ``score_inputs``
+    either way for forward-compat / observability.
+
+    utility / gravity inputs default to 0.0 because P3 has no
+    utility-event ledger or gravity store yet (D5).
 
     ``t_access`` is wired to ``valid_from`` as the recency seed (the
     fact's first appearance in the system); ``recorded_at`` would be
@@ -572,10 +596,30 @@ def _score_one(
     Returns ``(score, score_inputs)`` where ``score_inputs`` records
     the term values for forward-compat with the §8.4 emit-pipeline.
     """
-    connectedness_value = (rrf_score / rrf_max) if rrf_max > 0 else 0.0
-    # Belt-and-braces clamp; numerical drift in (rrf_score / rrf_max)
-    # cannot push the term out of [0, 1], but the assertion is documented
-    # in per_class.score so we keep the values explicitly bounded here.
+    if s1_client is not None:
+        # P4 C8: PPR-derived connectedness against live S1 adjacency.
+        # See module docstring step 7 for the determinism note —
+        # response depends on adjacency state at call time.
+        # TODO(P7): wrap in S1Outage absorber mirroring S3Outage handling
+        # (_retrieve_per_source); on outage fall back to connectedness=0.0
+        # and set store_health.degraded=True.
+        # TODO(P-later): batch adjacency_2hop into one backend call per
+        # recall when Graphiti per-fact latency dominates (P7+ profiling
+        # pass).
+        adj = s1_client.adjacency_2hop(fact_id=record.fact_id)
+        connectedness_value = compute_connectedness(adj, fact_id=record.fact_id)
+    else:
+        # TODO(P9+): drop this proxy fallback when real fact-extraction
+        # (gap-06) lands and every recall path has live S1 adjacency.
+        # At that point either delete this branch (replace with
+        # ``connectedness_value = 0.0``) or make ``s1_client`` mandatory.
+        # P3-era no-graph fallback: callers that haven't wired S1 yet
+        # (e.g. DMR sanity replay; many P3 unit tests) get the RRF-rank
+        # proxy so the per-class ordering remains statistically
+        # meaningful. Preserves D3-P3 (recall@5 ≥ 0.60 floor).
+        connectedness_value = (rrf_score / rrf_max) if rrf_max > 0 else 0.0
+    # Belt-and-braces clamp; both branches stay in [0, 1] but make
+    # the bound explicit (per_class.score requires this range).
     connectedness_value = max(0.0, min(1.0, connectedness_value))
     utility_value = 0.0
     contradiction_count = 0
@@ -614,6 +658,7 @@ def recall(
     lexical: LexicalBackend,
     semantic: SemanticBackend | None = None,
     graph: GraphBackend | None = None,
+    s1_client: S1Client | None = None,
     preference_source: PreferenceSource = EMPTY_PREFERENCE_SOURCE,
     event_sink: Callable[[Mapping[str, Any]], None] | None = None,
     now: datetime | None = None,
@@ -631,6 +676,13 @@ def recall(
             lexical-only fallback. ``S3Outage`` raised by the backend
             is absorbed and surfaces in ``store_health.degraded=True``.
         graph: optional graph backend; ``None`` skips the graph retriever.
+        s1_client: optional per-tenant S1 client used to materialize the
+            2-hop fact-graph adjacency for the PPR connectedness term
+            (P4 C8). When ``None``, the connectedness term is 0.0 (no
+            graph signal contributes; see :func:`_score_one`). Must
+            be scoped to ``request.tenant_id`` — a tenant mismatch
+            raises :class:`RecallValidationError` to prevent
+            cross-tenant adjacency leakage.
         preference_source: S4a Protocol; defaults to the empty source so
             tenants without S4a get a zero-page envelope.
         event_sink: deterministic recording sink for tests; ``None``
@@ -643,7 +695,8 @@ def recall(
         and store-health snapshot.
 
     Raises:
-        RecallValidationError: ``k < 0`` or empty ``tenant_id`` / ``query``.
+        RecallValidationError: ``k < 0`` or empty ``tenant_id`` / ``query``,
+            or ``s1_client.tenant_id`` does not match ``request.tenant_id``.
         RecallLedgerCorruption: same recall_id with divergent payload
             (substrate bug, not a caller error).
     """
@@ -656,6 +709,14 @@ def recall(
         # Empty string is allowed (lexical search will return nothing);
         # None is a contract violation.
         raise RecallValidationError("recall: query must be a string (not None)")
+    if s1_client is not None and s1_client.tenant_id != request.tenant_id:
+        # P4 C8 IMPLEMENT 8 A3: cross-tenant adjacency leakage is a
+        # silent ranking corruption; fail loudly instead.
+        raise RecallValidationError(
+            f"recall: s1_client.tenant_id ({s1_client.tenant_id!r}) does "
+            f"not match request.tenant_id ({request.tenant_id!r}); "
+            "adjacency must be scoped to the requesting tenant"
+        )
 
     # ---- Step 1: recall_id (deterministic) ------------------------------
     canonical_intent = _canonical_intent(request.intent)
@@ -769,7 +830,11 @@ def recall(
             # crash so a backend bug doesn't break recall.
             continue
         composed, inputs = _score_one(
-            record=record, rrf_score=fused_hit.score, rrf_max=rrf_max, t_now=n
+            record=record,
+            rrf_score=fused_hit.score,
+            rrf_max=rrf_max,
+            t_now=n,
+            s1_client=s1_client,
         )
         scored.append((fused_hit, record, composed, inputs))
 

@@ -25,10 +25,11 @@ transport-surface concern).
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 # Eager import per facilitator note: a broken or missing graphiti-core must
 # fail at `uv sync` rather than ship a no-Graphiti substrate that nobody
@@ -36,6 +37,45 @@ from typing import Protocol
 import graphiti_core  # noqa: F401  (eagerness is the point; symbol is unused)
 
 from lethe.store.s1_graph.schema import BASELINE_ENTITY_TYPES
+
+# P4 C8 — the canonical Adjacency/NodeId aliases live in
+# :mod:`lethe.runtime.scoring.connectedness`, but importing from there at
+# module scope triggers ``lethe.runtime/__init__.py`` which eagerly loads
+# :mod:`lethe.runtime.tenant_init` which imports back from ``lethe.store.s1_graph``
+# → circular. We re-declare the aliases here under TYPE_CHECKING (string
+# annotations via ``from __future__ import annotations`` keep them
+# stringified at runtime) and inline the cap default with an integrity
+# assertion at first use to lock the single-source-of-truth invariant
+# (sub-plan §m.O1 + IMPLEMENT 8 A5 layered-duplication intent).
+if TYPE_CHECKING:
+    from lethe.runtime.scoring.connectedness import Adjacency
+NodeId = str
+
+#: Local mirror of :data:`lethe.runtime.scoring.connectedness.DEFAULT_TWO_HOP_CAP`.
+#: An import-time assertion at first-use (see :meth:`S1Client.adjacency_2hop` and
+#: :meth:`_InMemoryGraphBackend.adjacency_2hop`) verifies the values stay in
+#: lockstep should the upstream constant ever change.
+DEFAULT_TWO_HOP_CAP: Final[int] = 500
+
+
+def _assert_default_cap_in_sync() -> None:
+    """Lazy integrity check: this module's local ``DEFAULT_TWO_HOP_CAP`` must
+    equal the canonical value in :mod:`lethe.runtime.scoring.connectedness`.
+
+    Called inside the first invocation of any ``adjacency_2hop`` impl so
+    a future drift surfaces as a loud :class:`AssertionError` rather than
+    a silent semantic divergence.
+    """
+    from lethe.runtime.scoring.connectedness import (
+        DEFAULT_TWO_HOP_CAP as _CANONICAL_DEFAULT_TWO_HOP_CAP,
+    )
+
+    assert DEFAULT_TWO_HOP_CAP == _CANONICAL_DEFAULT_TWO_HOP_CAP, (
+        f"s1_graph.client DEFAULT_TWO_HOP_CAP ({DEFAULT_TWO_HOP_CAP}) "
+        f"drifted from connectedness.DEFAULT_TWO_HOP_CAP "
+        f"({_CANONICAL_DEFAULT_TWO_HOP_CAP}); update both in lockstep "
+        "(local mirror exists only to break a circular import)"
+    )
 
 
 @dataclass(frozen=True)
@@ -196,6 +236,51 @@ class GraphBackend(Protocol):
         """
         ...
 
+    def adjacency_2hop(
+        self,
+        *,
+        group_id: str,
+        fact_id: NodeId,
+        cap: int = DEFAULT_TWO_HOP_CAP,
+    ) -> Adjacency:
+        """Return the 2-hop fact-graph slice around ``fact_id`` (P4 C8).
+
+        Used by :func:`lethe.api.recall._score_one` to feed the real
+        :func:`lethe.runtime.scoring.connectedness.connectedness`
+        computation (replacing the P3 ``rrf_score / rrf_max`` proxy).
+
+        Returned :data:`~lethe.runtime.scoring.connectedness.Adjacency`
+        shape: ``Mapping[NodeId, Mapping[NodeId, float]]`` where the
+        inner map's value is the (positive) edge weight.
+
+        **Directionality (P4 C8 sub-plan §m.O3):** backends return
+        adjacency in their native directionality (typically directed:
+        edge ``a → b`` with weight ``w`` may not have a corresponding
+        ``b → a`` entry). The caller
+        (:func:`~lethe.runtime.scoring.connectedness.connectedness` →
+        :func:`~lethe.runtime.scoring.connectedness.two_hop_subgraph`)
+        symmetrizes before running PPR, so backends do NOT need to
+        emit symmetric edges.
+
+        **Tenant semantics (P4 C8 sub-plan §m.O8):** READ surface;
+        permissive. An unbootstrapped tenant, a bootstrapped tenant
+        with no edges seeded, or a ``fact_id`` absent from the tenant's
+        edges all return ``{}``. Contrast :meth:`set_fact_valid_to`
+        which raises :class:`KeyError` on missing tenant/fact.
+
+        **Cap semantics (P4 C8 sub-plan §m.O2):** ``cap`` bounds the
+        node count of the returned slice. The
+        :class:`_InMemoryGraphBackend` enforces it via BFS truncation.
+        :class:`GraphitiBackend` (live impl at P7) MUST enforce
+        ``cap`` server-side via cypher ``LIMIT`` to avoid materializing
+        million-edge subgraphs;
+        :func:`~lethe.runtime.scoring.connectedness.connectedness` also
+        applies ``cap`` defense-in-depth via its own internal
+        :func:`~lethe.runtime.scoring.connectedness.two_hop_subgraph`
+        call.
+        """
+        ...
+
 
 class _InMemoryGraphBackend:
     """Private in-memory backend — used by unit tests only.
@@ -221,12 +306,20 @@ class _InMemoryGraphBackend:
         # invariant: keyed by group_id, populated lazily on bootstrap +
         # on _seed_fact (test-only helper).
         self._facts: dict[str, dict[str, FactRecord]] = {}
+        # P4 C8 (sub-plan §m.S1): per-tenant adjacency store backing
+        # adjacency_2hop. Outer key is group_id (tenant scope); inner
+        # value is a directed edge map ``src -> dst -> weight``. Edges
+        # are seeded by the test-only ``_seed_adjacency_edge`` helper.
+        # connectedness() symmetrizes inside two_hop_subgraph, so the
+        # backend stores edges in their native (directed) form.
+        self._edges: dict[str, dict[NodeId, dict[NodeId, float]]] = {}
 
     def bootstrap_tenant(self, group_id: str) -> None:
         self._tenants.add(group_id)
         self._entity_types.setdefault(group_id, set())
         self._episodes.setdefault(group_id, [])
         self._facts.setdefault(group_id, {})
+        self._edges.setdefault(group_id, {})
 
     def register_entity_type(self, type_name: str) -> None:
         """Register ``type_name`` on every currently-bootstrapped tenant.
@@ -394,6 +487,91 @@ class _InMemoryGraphBackend:
         records.sort(key=lambda r: r.fact_id)
         return records
 
+    # P4 C8 — adjacency surface for the recall PPR connectedness wire-in.
+
+    def _seed_adjacency_edge(
+        self,
+        *,
+        group_id: str,
+        src: NodeId,
+        dst: NodeId,
+        weight: float,
+    ) -> None:
+        """Test-only helper to seed one directed adjacency edge (P4 C8 §m.O7).
+
+        Mirrors :meth:`_seed_fact` posture (loud-fail on unbootstrapped
+        tenant; leading-underscore signals "not on the GraphBackend
+        Protocol; unit-test substrate only"). Caller-responsibility
+        for symmetrization: connectedness symmetrizes inside
+        ``two_hop_subgraph``, but if a test wants the in-memory
+        backend to return symmetric edges (e.g. to assert backend
+        output shape), call this twice (once per direction).
+        """
+        if group_id not in self._tenants:
+            raise ValueError(
+                f"_InMemoryGraphBackend._seed_adjacency_edge: "
+                f"tenant {group_id!r} has not been bootstrapped"
+            )
+        self._edges.setdefault(group_id, {}).setdefault(src, {})[dst] = float(weight)
+
+    def _edges_for(self, group_id: str) -> Adjacency:
+        """Read-only view of seeded edges for assertions (mirror :meth:`_episodes_for`)."""
+        return {src: dict(nbrs) for src, nbrs in self._edges.get(group_id, {}).items()}
+
+    def adjacency_2hop(
+        self,
+        *,
+        group_id: str,
+        fact_id: NodeId,
+        cap: int = DEFAULT_TWO_HOP_CAP,
+    ) -> Adjacency:
+        """Return the BFS-bounded 2-hop slice around ``fact_id`` (P4 C8 §m.O8 + A2).
+
+        Implementation mirrors
+        :func:`lethe.runtime.scoring.connectedness.two_hop_subgraph`
+        semantics WITHOUT importing it (keeps the slicer logic in the
+        backend layer where the tenant state lives; layered duplication
+        is intentional per IMPLEMENT 8 A2).
+
+        Returns ``{}`` for an unbootstrapped tenant, a bootstrapped
+        tenant with no seeded edges, OR a ``fact_id`` absent from the
+        tenant's edges (sub-plan §m.O8 cases 1/2/3 all collapse to
+        ``{}``). Deep-copies inner neighbor dicts before returning so
+        callers cannot mutate backend state through the result
+        (IMPLEMENT 8 A5).
+        """
+        _assert_default_cap_in_sync()
+        if cap < 1:
+            raise ValueError(f"_InMemoryGraphBackend.adjacency_2hop: cap must be >= 1, got {cap!r}")
+        tenant_edges = self._edges.get(group_id, {})
+        if fact_id not in tenant_edges:
+            return {}
+
+        # BFS to depth 2 within the tenant edges, capped at `cap` nodes.
+        visited: set[NodeId] = {fact_id}
+        queue: deque[tuple[NodeId, int]] = deque([(fact_id, 0)])
+        while queue and len(visited) < cap:
+            node, depth = queue.popleft()
+            if depth >= 2:
+                continue
+            for nbr in tenant_edges.get(node, {}):
+                if nbr in visited:
+                    continue
+                visited.add(nbr)
+                if len(visited) >= cap:
+                    break
+                queue.append((nbr, depth + 1))
+
+        # Restrict edges to endpoints inside `visited`. Deep copy of
+        # inner neighbor maps — caller must not be able to mutate
+        # backend state via the returned Adjacency (IMPLEMENT 8 A5).
+        sub: dict[NodeId, dict[NodeId, float]] = {}
+        for node in visited:
+            sub[node] = {
+                nbr: float(w) for nbr, w in tenant_edges.get(node, {}).items() if nbr in visited
+            }
+        return sub
+
 
 class GraphitiBackend:
     """Production adapter wrapping :class:`graphiti_core.Graphiti`.
@@ -504,6 +682,19 @@ class GraphitiBackend:
             "the live Neo4j/FalkorDB read path (P4 commit 6 — IMPLEMENT 6 A1)"
         )
 
+    def adjacency_2hop(  # pragma: no cover - P7
+        self,
+        *,
+        group_id: str,
+        fact_id: NodeId,
+        cap: int = DEFAULT_TWO_HOP_CAP,
+    ) -> Adjacency:
+        raise NotImplementedError(
+            "GraphitiBackend.adjacency_2hop wires in at P7 alongside the live "
+            "Neo4j/FalkorDB read path (P4 C8 — server-side cap MUST be enforced "
+            "via cypher LIMIT to avoid 1M-edge materialization)"
+        )
+
 
 class S1Client:
     """Thin façade over a :class:`GraphBackend`, scoped to a single tenant.
@@ -585,3 +776,29 @@ class S1Client:
         backfilled}.
         """
         return self._backend.iter_facts_with_valid_to(group_id=self._tenant_id)
+
+    def adjacency_2hop(
+        self,
+        *,
+        fact_id: NodeId,
+        cap: int = DEFAULT_TWO_HOP_CAP,
+    ) -> Adjacency:
+        """Return the 2-hop fact-graph slice around ``fact_id`` (P4 C8).
+
+        Façade over :meth:`GraphBackend.adjacency_2hop` that pins
+        ``group_id`` to ``self._tenant_id``. Mirrors the C5/C6 façade
+        pattern so :func:`lethe.api.recall._score_one` doesn't need
+        to thread the tenant_id/group_id consistency by hand.
+
+        Permissive read posture (sub-plan §m.O8): returns ``{}`` for
+        an unbootstrapped tenant, a tenant with no seeded edges, or
+        a ``fact_id`` absent from the tenant's edges. The
+        :func:`~lethe.runtime.scoring.connectedness.connectedness`
+        caller folds an empty adjacency to ``connectedness == 0.0``
+        via its degree-percentile fallback (isolated-node case).
+        """
+        return self._backend.adjacency_2hop(
+            group_id=self._tenant_id,
+            fact_id=fact_id,
+            cap=cap,
+        )
