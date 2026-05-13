@@ -102,9 +102,7 @@ def test_validate_rejects_contamination_protected_truthy_non_bool() -> None:
         validate(env)
 
 
-@pytest.mark.parametrize(
-    "missing_field", ["fact_ids", "decision", "provenance"]
-)
+@pytest.mark.parametrize("missing_field", ["fact_ids", "decision", "provenance"])
 def test_validate_rejects_remember_missing_per_type_extras(
     missing_field: str,
 ) -> None:
@@ -130,10 +128,15 @@ def test_validate_rejects_remember_with_non_list_fact_ids() -> None:
 
 
 def test_validate_does_not_require_per_type_extras_for_other_event_types() -> None:
-    """Per-type extras are only enforced for event types whose owning verb has landed."""
+    """Per-type extras are only enforced for event types whose owning verb has landed.
+
+    ``recall_outcome`` is the only event type that stays common-only after
+    P4 (D5-P3 — emission deferred to P9; only the recall_id join-key is
+    plumbed earlier). All other §8.1 types now have per-type required sets.
+    """
     env = _remember_envelope()
-    env["event_type"] = "promote"
-    # Strip the remember-specific extras; promote has no per-type extras at P2.
+    env["event_type"] = "recall_outcome"
+    # Strip the remember-specific extras; recall_outcome has no per-type extras.
     for key in ("fact_ids", "decision", "provenance"):
         env.pop(key, None)
     validate(env)  # no raise
@@ -263,9 +266,7 @@ def test_validate_accepts_recall_path_synthesis() -> None:
     validate(env)
 
 
-@pytest.mark.parametrize(
-    "missing_field", ["recall_id", "fact_ids", "path"]
-)
+@pytest.mark.parametrize("missing_field", ["recall_id", "fact_ids", "path"])
 def test_validate_rejects_recall_missing_per_type_extras(
     missing_field: str,
 ) -> None:
@@ -317,3 +318,332 @@ def test_emit_dispatches_validated_recall_event() -> None:
     assert len(captured) == 1
     assert captured[0]["event_type"] == "recall"
     assert captured[0]["path"] == "recall"
+
+
+# ---------------------------------------------------------------------------
+# promote / demote envelopes (P4)
+# ---------------------------------------------------------------------------
+
+
+def _promote_envelope() -> dict[str, Any]:
+    """A complete ``promote`` envelope per scoring §8.1 + §8.2 + P4 per-type extras."""
+    return {
+        "event_id": "01890af0-0000-7000-8000-000000000001",
+        "event_type": "promote",
+        "tenant_id": "tenant-a",
+        "ts_recorded": "2026-05-12T17:00:00Z",
+        "ts_valid": "2026-05-12T17:00:00Z",
+        "model_version": "v1.0.0",
+        "weights_version": "sha256:0000000000000000",
+        "contamination_protected": True,
+        "fact_ids": ["fact-1"],
+        "decision": "promoted_to_S3",
+        "score_output": 0.87,
+    }
+
+
+def _demote_envelope() -> dict[str, Any]:
+    """A complete ``demote`` envelope per scoring §8.1 + §8.2 + P4 per-type extras."""
+    env = _promote_envelope()
+    env["event_id"] = "01890af0-0000-7000-8000-000000000002"
+    env["event_type"] = "demote"
+    env["decision"] = "demoted"
+    env["score_output"] = 0.12
+    return env
+
+
+def test_validate_accepts_full_promote_envelope() -> None:
+    validate(_promote_envelope())
+
+
+def test_validate_accepts_full_demote_envelope() -> None:
+    validate(_demote_envelope())
+
+
+def test_validate_accepts_score_output_int_or_float() -> None:
+    """``score_output`` may be int or float (just not bool)."""
+    env = _promote_envelope()
+    env["score_output"] = 1
+    validate(env)
+    env["score_output"] = 0
+    validate(env)
+    env["score_output"] = -3.14
+    validate(env)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+@pytest.mark.parametrize("missing_field", ["fact_ids", "decision", "score_output"])
+def test_validate_rejects_promote_demote_missing_per_type_extras(
+    event_type: str, missing_field: str
+) -> None:
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    del env[missing_field]
+    with pytest.raises(EventValidationError) as excinfo:
+        validate(env)
+    assert missing_field in str(excinfo.value)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+def test_validate_rejects_promote_demote_with_empty_fact_ids(event_type: str) -> None:
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    env["fact_ids"] = []
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+def test_validate_rejects_promote_demote_with_non_str_fact_ids(event_type: str) -> None:
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    env["fact_ids"] = ["fact-1", 42]
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+def test_validate_rejects_promote_demote_with_empty_decision(event_type: str) -> None:
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    env["decision"] = ""
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+def test_validate_rejects_promote_demote_with_non_str_decision(event_type: str) -> None:
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    env["decision"] = 42
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+def test_validate_rejects_promote_demote_with_non_numeric_score(event_type: str) -> None:
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    env["score_output"] = "0.87"
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+@pytest.mark.parametrize("event_type", ["promote", "demote"])
+def test_validate_rejects_promote_demote_with_bool_score(event_type: str) -> None:
+    """Defense in depth: ``True is 1`` so isinstance(True, int) is truthy.
+
+    A boolean ``score_output`` is not a valid §8.2 score and must be rejected
+    before the v2 trainer ingests a {True, False} signal as {1, 0}.
+    """
+    env = _promote_envelope() if event_type == "promote" else _demote_envelope()
+    env["score_output"] = True
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_emit_dispatches_validated_promote_event() -> None:
+    captured: list[dict[str, Any]] = []
+    emit(_promote_envelope(), sink=lambda e: captured.append(dict(e)))
+    assert len(captured) == 1
+    assert captured[0]["event_type"] == "promote"
+    assert captured[0]["decision"] == "promoted_to_S3"
+
+
+def test_emit_dispatches_validated_demote_event() -> None:
+    captured: list[dict[str, Any]] = []
+    emit(_demote_envelope(), sink=lambda e: captured.append(dict(e)))
+    assert len(captured) == 1
+    assert captured[0]["event_type"] == "demote"
+    assert captured[0]["decision"] == "demoted"
+
+
+# ---------------------------------------------------------------------------
+# invalidate envelopes (P4)
+# ---------------------------------------------------------------------------
+
+
+def _invalidate_envelope() -> dict[str, Any]:
+    """A complete ``invalidate`` envelope per scoring §8.1 + §8.2 + P4 per-type extras."""
+    return {
+        "event_id": "01890af0-0000-7000-8000-000000000003",
+        "event_type": "invalidate",
+        "tenant_id": "tenant-a",
+        "ts_recorded": "2026-05-12T17:00:00Z",
+        "ts_valid": "2026-05-12T17:00:00Z",
+        "model_version": "v1.0.0",
+        "weights_version": "sha256:0000000000000000",
+        "contamination_protected": True,
+        "fact_ids": ["fact-1"],
+        "decision": "superseded",
+        "superseded_by": "fact-2",
+    }
+
+
+def test_validate_accepts_full_invalidate_envelope() -> None:
+    validate(_invalidate_envelope())
+
+
+def test_validate_accepts_invalidate_with_null_superseded_by() -> None:
+    """Hard invalidate (no successor): superseded_by may be None per gap-13."""
+    env = _invalidate_envelope()
+    env["superseded_by"] = None
+    env["decision"] = "hard_invalidate"
+    validate(env)
+
+
+@pytest.mark.parametrize("missing_field", ["fact_ids", "decision", "superseded_by"])
+def test_validate_rejects_invalidate_missing_per_type_extras(
+    missing_field: str,
+) -> None:
+    env = _invalidate_envelope()
+    del env[missing_field]
+    with pytest.raises(EventValidationError) as excinfo:
+        validate(env)
+    assert missing_field in str(excinfo.value)
+
+
+def test_validate_rejects_invalidate_with_empty_fact_ids() -> None:
+    env = _invalidate_envelope()
+    env["fact_ids"] = []
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_invalidate_with_non_str_fact_ids() -> None:
+    env = _invalidate_envelope()
+    env["fact_ids"] = ["fact-1", 42]
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_invalidate_with_empty_decision() -> None:
+    env = _invalidate_envelope()
+    env["decision"] = ""
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_invalidate_with_empty_superseded_by_str() -> None:
+    """superseded_by must be None OR a non-empty str — empty string is not legal."""
+    env = _invalidate_envelope()
+    env["superseded_by"] = ""
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_invalidate_with_non_str_superseded_by() -> None:
+    env = _invalidate_envelope()
+    env["superseded_by"] = 42
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_emit_dispatches_validated_invalidate_event() -> None:
+    captured: list[dict[str, Any]] = []
+    emit(_invalidate_envelope(), sink=lambda e: captured.append(dict(e)))
+    assert len(captured) == 1
+    assert captured[0]["event_type"] == "invalidate"
+    assert captured[0]["superseded_by"] == "fact-2"
+
+
+# ---------------------------------------------------------------------------
+# consolidate_phase envelopes (P4)
+# ---------------------------------------------------------------------------
+
+
+def _consolidate_phase_envelope() -> dict[str, Any]:
+    """A complete ``consolidate_phase`` envelope per §8.1 + §8.2 + P4 per-type extras."""
+    return {
+        "event_id": "01890af0-0000-7000-8000-000000000004",
+        "event_type": "consolidate_phase",
+        "tenant_id": "tenant-a",
+        "ts_recorded": "2026-05-12T17:00:00Z",
+        "ts_valid": "2026-05-12T17:00:00Z",
+        "model_version": "v1.0.0",
+        "weights_version": "sha256:0000000000000000",
+        "contamination_protected": True,
+        "phase_name": "extract",
+        "consolidate_run_id": "01890af0-0000-7000-8000-00000000aa01",
+    }
+
+
+def test_validate_accepts_full_consolidate_phase_envelope() -> None:
+    validate(_consolidate_phase_envelope())
+
+
+@pytest.mark.parametrize(
+    "phase_name",
+    ["extract", "score", "promote", "demote", "consolidate", "invalidate"],
+)
+def test_validate_accepts_all_six_canonical_phases(phase_name: str) -> None:
+    """IMPL §2.4 invariant I-11: six canonical dream-daemon phases."""
+    env = _consolidate_phase_envelope()
+    env["phase_name"] = phase_name
+    validate(env)
+
+
+@pytest.mark.parametrize("missing_field", ["phase_name", "consolidate_run_id"])
+def test_validate_rejects_consolidate_phase_missing_per_type_extras(
+    missing_field: str,
+) -> None:
+    env = _consolidate_phase_envelope()
+    del env[missing_field]
+    with pytest.raises(EventValidationError) as excinfo:
+        validate(env)
+    assert missing_field in str(excinfo.value)
+
+
+def test_validate_rejects_consolidate_phase_with_unknown_phase_name() -> None:
+    env = _consolidate_phase_envelope()
+    env["phase_name"] = "rerank"  # not one of the six §0 process row phases
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_consolidate_phase_with_non_str_phase_name() -> None:
+    env = _consolidate_phase_envelope()
+    env["phase_name"] = 42
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_consolidate_phase_with_empty_run_id() -> None:
+    env = _consolidate_phase_envelope()
+    env["consolidate_run_id"] = ""
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_consolidate_phase_with_non_str_run_id() -> None:
+    env = _consolidate_phase_envelope()
+    env["consolidate_run_id"] = 12345
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_emit_dispatches_validated_consolidate_phase_event() -> None:
+    captured: list[dict[str, Any]] = []
+    emit(_consolidate_phase_envelope(), sink=lambda e: captured.append(dict(e)))
+    assert len(captured) == 1
+    assert captured[0]["event_type"] == "consolidate_phase"
+    assert captured[0]["phase_name"] == "extract"
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting P4 invariants
+# ---------------------------------------------------------------------------
+
+
+def test_per_type_required_now_covers_six_of_seven_event_types() -> None:
+    """Sanity-pin: at P4 only ``recall_outcome`` remains common-only."""
+    from lethe.runtime.events import _PER_TYPE_REQUIRED, _VALID_EVENT_TYPES
+
+    covered = set(_PER_TYPE_REQUIRED.keys())
+    assert covered == _VALID_EVENT_TYPES - {"recall_outcome"}, (
+        f"P4 contract: every §8.1 event type except recall_outcome has per-type extras; "
+        f"got covered={sorted(covered)}, missing={sorted(_VALID_EVENT_TYPES - covered)}"
+    )
+
+
+def test_valid_consolidate_phases_pinned_to_six_canonical() -> None:
+    """IMPL §2.4 invariant I-11: exactly the six dream-daemon phases."""
+    from lethe.runtime.events import _VALID_CONSOLIDATE_PHASES
+
+    expected = frozenset({"extract", "score", "promote", "demote", "consolidate", "invalidate"})
+    assert expected == _VALID_CONSOLIDATE_PHASES
+    assert len(_VALID_CONSOLIDATE_PHASES) == 6
