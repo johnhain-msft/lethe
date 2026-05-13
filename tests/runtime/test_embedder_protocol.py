@@ -207,12 +207,16 @@ def test_consolidate_package_reexports_embedder_and_null_embedder() -> None:
     assert pkg.NullEmbedder is NullEmbedder
 
 
-def test_consolidate_package_all_is_minimal_at_p4_commit_3() -> None:
-    """The ``__all__`` list at C3 contains EXACTLY the embedder seam
-    surface. Adding to it is a future-commit responsibility (C4–C9);
-    this test pins the scope so accidental over-export surfaces."""
+def test_consolidate_package_all_includes_embedder_seam() -> None:
+    """The ``__all__`` list MUST include both embedder-seam symbols.
+    Other consolidate symbols (score / gravity / contradiction adapters
+    in C4; loop / phases / extract / embed / promote / demote /
+    invalidate / scheduler in C5–C9) append as they land — this test
+    pins the embedder-seam contract specifically and is invariant
+    across C4–C9 additions."""
     pkg = importlib.import_module("lethe.runtime.consolidate")
-    assert pkg.__all__ == ["Embedder", "NullEmbedder"]
+    assert "Embedder" in pkg.__all__
+    assert "NullEmbedder" in pkg.__all__
 
 
 # ---------------------------------------------------------------------------
