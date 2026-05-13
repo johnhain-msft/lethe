@@ -80,10 +80,13 @@ class _InMemoryGraphBackend:
 
     Not exported as part of the public API (leading underscore). Keeps
     the P1+P2 substrate exercisable without standing up Neo4j /
-    FalkorDB. NOTE: ``register_entity_type`` is intentionally tenant-
-    blind today (registers the type on every bootstrapped tenant); the
-    canonical mapping is "type registered globally on the backend",
-    which the production graphiti backend will mirror.
+    FalkorDB.
+
+    **Tenant-blind entity-type registry (P1 QA nit#1).** The
+    ``_entity_types`` map keys per-tenant *sets* whose union is fed
+    every newly bootstrapped tenant by :meth:`register_entity_type`
+    (see method docstring for the rationale and contract). The episode
+    store is per-tenant; only the type registry is tenant-blind.
     """
 
     def __init__(self) -> None:
@@ -97,6 +100,24 @@ class _InMemoryGraphBackend:
         self._episodes.setdefault(group_id, [])
 
     def register_entity_type(self, type_name: str) -> None:
+        """Register ``type_name`` on every currently-bootstrapped tenant.
+
+        **Invariant (P1 QA nit#1, locked decision #5).** The in-memory
+        backend's entity-type registry is intentionally
+        process-global / tenant-blind: entity types are *schema*, not
+        *data*. Per-tenant isolation lives in the episode/edge stores
+        (``_episodes`` here; per-tenant graph partitions in production),
+        not in the type registry. Registering a new type therefore
+        applies it to every bootstrapped tenant in this process.
+
+        The production :class:`GraphitiBackend` does **not** inherit
+        this property: the live graphiti adapter must register types
+        per ``group_id`` because graphiti's storage substrate scopes
+        type metadata by group. This in-memory shim's tenant-blind
+        broadcast is a test-only convenience that mirrors the
+        "registered globally on the backend" mental model without
+        replaying the per-group registration plumbing.
+        """
         for group_id in self._tenants:
             self._entity_types[group_id].add(type_name)
 
