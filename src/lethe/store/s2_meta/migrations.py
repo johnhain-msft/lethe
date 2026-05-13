@@ -16,9 +16,18 @@ Schema version history:
 - v3 (P3): ``recall_ledger`` columned per facilitator P3 plan §(d). Same
   drop-and-recreate semantics as v2 (table is an empty stub at v2 — no
   verb writes to it before P3).
+- v4 (P4): ``consolidation_state`` + ``promotion_flags`` + ``utility_events``
+  columned per facilitator P4 plan §(c) (kickoff §6 open item A). All
+  three are stubs at v3 — no verb writes to them before P4 — so
+  drop-and-recreate is safe. The already-columned tables (``recall_ledger``,
+  ``extraction_log``, ``audit_log``) are NOT touched by this migration:
+  they hold real production rows from P2/P3, and the standing rule below
+  binds.
 
-Future migrations (P4+) for tables that may already hold rows MUST use
-``ALTER TABLE`` rather than drop-and-recreate.
+Future migrations (P5+) for tables that may already hold rows MUST use
+``ALTER TABLE`` rather than drop-and-recreate. After v4 every named table
+in :data:`lethe.store.s2_meta.schema.S2_TABLE_NAMES` has a non-stub shape,
+so this rule applies to every subsequent migration.
 """
 
 from __future__ import annotations
@@ -28,11 +37,15 @@ from collections.abc import Callable
 
 from lethe.store.s2_meta.schema import (
     _DDL_AUDIT_LOG,
+    _DDL_CONSOLIDATION_STATE,
     _DDL_EXTRACTION_LOG,
+    _DDL_PROMOTION_FLAGS,
     _DDL_RECALL_LEDGER,
+    _DDL_UTILITY_EVENTS,
+    _DDL_UTILITY_EVENTS_INDEX,
 )
 
-LATEST_SCHEMA_VERSION = 3
+LATEST_SCHEMA_VERSION = 4
 
 
 def _m2_extraction_and_audit_columns(conn: sqlite3.Connection) -> None:
@@ -61,11 +74,37 @@ def _m3_recall_ledger_columns(conn: sqlite3.Connection) -> None:
     conn.execute(_DDL_RECALL_LEDGER)
 
 
+def _m4_consolidate_v4(conn: sqlite3.Connection) -> None:
+    """v3 → v4: column ``consolidation_state`` + ``promotion_flags`` + ``utility_events``.
+
+    All three tables are P3 stubs ``(id, created_at)`` and contain no rows
+    in any valid v3 deployment (no verb writes to them before P4), so
+    drop-and-recreate is safe (kickoff §D8 + QA-G1 §B.5). The already-
+    columned tables (``recall_ledger``, ``extraction_log``, ``audit_log``)
+    are intentionally NOT touched here — they hold real production rows
+    from P2/P3, and the module docstring's ALTER discipline binds. P5+
+    extensions to those tables MUST use ``ALTER TABLE``.
+
+    The ``utility_events`` composite index ``(tenant_id, fact_id, ts_recorded)``
+    is created alongside the table in this same step so the consolidate
+    δ-term aggregation hot path is indexed from day one (per facilitator
+    plan §(c) + §(i) open item A).
+    """
+    conn.execute("DROP TABLE IF EXISTS consolidation_state")
+    conn.execute(_DDL_CONSOLIDATION_STATE)
+    conn.execute("DROP TABLE IF EXISTS promotion_flags")
+    conn.execute(_DDL_PROMOTION_FLAGS)
+    conn.execute("DROP TABLE IF EXISTS utility_events")
+    conn.execute(_DDL_UTILITY_EVENTS)
+    conn.execute(_DDL_UTILITY_EVENTS_INDEX)
+
+
 # Each migration is `(version, callable)` where callable mutates the DB to
 # bring it from `version - 1` to `version`.
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (2, _m2_extraction_and_audit_columns),
     (3, _m3_recall_ledger_columns),
+    (4, _m4_consolidate_v4),
 )
 
 
@@ -74,9 +113,7 @@ def current_version(conn: sqlite3.Connection) -> int:
 
     Returns ``0`` if the meta row is absent (pre-bootstrap database).
     """
-    cur = conn.execute(
-        "SELECT value FROM _lethe_meta WHERE key = 'schema_version'"
-    )
+    cur = conn.execute("SELECT value FROM _lethe_meta WHERE key = 'schema_version'")
     row = cur.fetchone()
     if row is None:
         return 0
@@ -100,8 +137,7 @@ def apply_pending(conn: sqlite3.Connection) -> int:
         try:
             migrate(conn)
             conn.execute(
-                "INSERT OR REPLACE INTO _lethe_meta(key, value)"
-                " VALUES ('schema_version', ?)",
+                "INSERT OR REPLACE INTO _lethe_meta(key, value) VALUES ('schema_version', ?)",
                 (str(target),),
             )
             conn.execute("COMMIT")
@@ -110,4 +146,3 @@ def apply_pending(conn: sqlite3.Connection) -> int:
             raise
         version = target
     return version
-

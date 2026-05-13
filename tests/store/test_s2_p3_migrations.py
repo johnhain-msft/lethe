@@ -53,25 +53,27 @@ _EXPECTED_RECALL_LEDGER_COLUMNS: frozenset[str] = frozenset(
 )
 
 
-def test_latest_schema_version_is_3() -> None:
-    """Sanity-pin the v3 ratchet so a future bump fails this test loudly."""
-    assert LATEST_SCHEMA_VERSION == 3
+def test_latest_schema_version_is_at_least_3() -> None:
+    """P3 sanity-pin: the recall_ledger v3 ratchet has shipped (commit-3
+    contract). The exact LATEST may have moved past 3 as later phases
+    column more tables (P4+); the contract this test guards is that v3 is
+    now baked in. ``test_migrations_v3_to_v4`` (and any future
+    ``test_migrations_vN_to_vN+1``) owns the exact-LATEST tripwire.
+    """
+    assert LATEST_SCHEMA_VERSION >= 3
 
 
 def test_stub_tables_no_longer_include_recall_ledger() -> None:
     """Commit-3 contract: recall_ledger leaves the stub set."""
     assert "recall_ledger" not in _STUB_TABLES
-    # Other still-stub tables remain (P4+ will column them).
-    assert "utility_events" in _STUB_TABLES
-    assert "promotion_flags" in _STUB_TABLES
-    assert "consolidation_state" in _STUB_TABLES
 
 
-def test_fresh_create_is_at_v3_with_recall_ledger_columns(tenant_root: Path) -> None:
+def test_fresh_create_carries_recall_ledger_columns(tenant_root: Path) -> None:
     schema = S2Schema(tenant_root=tenant_root)
     conn = schema.create()
     try:
-        assert current_version(conn) == LATEST_SCHEMA_VERSION == 3
+        assert current_version(conn) == LATEST_SCHEMA_VERSION
+        assert LATEST_SCHEMA_VERSION >= 3
         cols = _columns(conn, "recall_ledger")
         assert _EXPECTED_RECALL_LEDGER_COLUMNS.issubset(cols), (
             f"missing: {_EXPECTED_RECALL_LEDGER_COLUMNS - cols}"
@@ -102,8 +104,7 @@ def test_recall_ledger_accepts_verb_row_shape(tenant_root: Path) -> None:
             ),
         )
         row = conn.execute(
-            "SELECT recall_id, tenant_id, classified_intent, weights_version"
-            " FROM recall_ledger"
+            "SELECT recall_id, tenant_id, classified_intent, weights_version FROM recall_ledger"
         ).fetchone()
         assert row == (
             "01234567-89ab-7def-8123-456789abcdef",
@@ -161,12 +162,8 @@ def _bootstrap_v2_database(tenant_root: Path) -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(
-        "CREATE TABLE _lethe_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-    )
-    conn.execute(
-        "INSERT INTO _lethe_meta(key, value) VALUES ('schema_version','2')"
-    )
+    conn.execute("CREATE TABLE _lethe_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO _lethe_meta(key, value) VALUES ('schema_version','2')")
     # P1/P2 stub shape for recall_ledger (id + created_at only).
     conn.execute(
         "CREATE TABLE recall_ledger ("
@@ -189,9 +186,7 @@ def test_v2_database_ratchets_to_v3(tenant_root: Path) -> None:
 
         assert new_version == LATEST_SCHEMA_VERSION
         assert current_version(conn) == LATEST_SCHEMA_VERSION
-        assert _EXPECTED_RECALL_LEDGER_COLUMNS.issubset(
-            _columns(conn, "recall_ledger")
-        )
+        assert _EXPECTED_RECALL_LEDGER_COLUMNS.issubset(_columns(conn, "recall_ledger"))
     finally:
         conn.close()
 
@@ -204,9 +199,7 @@ def test_apply_pending_is_idempotent_after_v3_ratchet(tenant_root: Path) -> None
         again = apply_pending(conn)
         assert again == LATEST_SCHEMA_VERSION
         assert current_version(conn) == LATEST_SCHEMA_VERSION
-        assert _EXPECTED_RECALL_LEDGER_COLUMNS.issubset(
-            _columns(conn, "recall_ledger")
-        )
+        assert _EXPECTED_RECALL_LEDGER_COLUMNS.issubset(_columns(conn, "recall_ledger"))
     finally:
         conn.close()
 
