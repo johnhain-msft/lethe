@@ -59,6 +59,32 @@ class EpisodeRecord:
     intent: str
 
 
+@dataclass(frozen=True)
+class FactRecord:
+    """One fact as surfaced to the consolidate-loop demote/invalidate +
+    reconciler phases (P4 C6 — sub-plan §k.2 + IMPLEMENT 6 amendment A1).
+
+    Bi-temporal stamps live here on S1; ``valid_to`` is ``None`` while the
+    fact is current and gets set to the demote/invalidate timestamp via
+    :meth:`GraphBackend.set_fact_valid_to`. The reconciler reads facts
+    via :meth:`GraphBackend.iter_facts_with_valid_to` to find S1
+    ``valid_to ≠ NULL`` rows that have no covering ``promotion_flags``
+    entry (composition §5 row 7 — A2 orphan definition includes
+    ``backfilled`` to avoid infinite re-backfill).
+
+    Frozen dataclass mirrors :class:`EpisodeRecord` (same Protocol-layer
+    posture, same mypy-strict + ``FrozenInstanceError`` semantics).
+    Public — re-exported from :mod:`lethe.runtime.consolidate` for the
+    phase modules to type their reconciler return values without
+    reaching into the store layer.
+    """
+
+    fact_id: str
+    group_id: str
+    valid_from: str
+    valid_to: str | None
+
+
 class GraphBackend(Protocol):
     """Minimum surface S1 needs from any backing graph store.
 
@@ -126,6 +152,50 @@ class GraphBackend(Protocol):
         """
         ...
 
+    def set_fact_valid_to(
+        self,
+        *,
+        group_id: str,
+        fact_id: str,
+        valid_to: str,
+    ) -> None:
+        """Set ``valid_to`` on one S1 fact (P4 C6 — demote / invalidate phases).
+
+        ``valid_to`` is an RFC 3339 timestamp string (the bi-temporal
+        end-of-validity stamp; composition §1 row 48 + scoring §6).
+        Calling on an already-invalidated fact OVERWRITES the prior
+        ``valid_to`` (re-invalidate semantics; the audit trail of the
+        prior stamp lives in the S5 consolidation log, not S1).
+
+        Per IMPLEMENT 6 amendment A10: raises :class:`KeyError` for an
+        unbootstrapped ``group_id`` AND for a missing ``fact_id`` within
+        a bootstrapped tenant. The write surface is STRICT (callers must
+        seed facts before invalidating them); contrast
+        :meth:`iter_facts_with_valid_to` which returns an empty
+        iterable for an unbootstrapped tenant.
+        """
+        ...
+
+    def iter_facts_with_valid_to(
+        self,
+        *,
+        group_id: str,
+    ) -> Iterable[FactRecord]:
+        """Yield S1 facts under ``group_id`` whose ``valid_to`` is non-NULL.
+
+        Used by the consolidate-loop reconciler (composition §5 row 7 +
+        IMPLEMENT 6 A2) to find S1 facts that have been invalidated but
+        lack a covering ``promotion_flags`` row (tier ∈ {demoted,
+        invalidated, backfilled}). The reconciler backfills a
+        ``tier='backfilled'`` row + S5 entry for each such orphan.
+
+        Per IMPLEMENT 6 amendment A10: returns an empty iterable for an
+        unbootstrapped ``group_id`` (the read surface is permissive —
+        only :meth:`set_fact_valid_to` raises). Yields records sorted by
+        ``fact_id`` ASC for determinism.
+        """
+        ...
+
 
 class _InMemoryGraphBackend:
     """Private in-memory backend — used by unit tests only.
@@ -145,11 +215,18 @@ class _InMemoryGraphBackend:
         self._tenants: set[str] = set()
         self._entity_types: dict[str, set[str]] = {}
         self._episodes: dict[str, list[dict[str, str]]] = {}
+        # P4 C6 (sub-plan §k.2 + IMPLEMENT 6 A1 + B-4): per-tenant facts
+        # store so set_fact_valid_to + iter_facts_with_valid_to mutate
+        # real state (not just record-the-call). Mirrors _episodes
+        # invariant: keyed by group_id, populated lazily on bootstrap +
+        # on _seed_fact (test-only helper).
+        self._facts: dict[str, dict[str, FactRecord]] = {}
 
     def bootstrap_tenant(self, group_id: str) -> None:
         self._tenants.add(group_id)
         self._entity_types.setdefault(group_id, set())
         self._episodes.setdefault(group_id, [])
+        self._facts.setdefault(group_id, {})
 
     def register_entity_type(self, type_name: str) -> None:
         """Register ``type_name`` on every currently-bootstrapped tenant.
@@ -237,6 +314,85 @@ class _InMemoryGraphBackend:
         if since_cursor is None:
             return records
         return [r for r in records if f"{r.ts_recorded}\t{r.episode_id}" > since_cursor]
+
+    # P4 C6 — fact surface for demote / invalidate / reconciler.
+
+    def _seed_fact(
+        self,
+        *,
+        group_id: str,
+        fact_id: str,
+        valid_from: str,
+        valid_to: str | None = None,
+    ) -> None:
+        """Test-only helper to populate the per-tenant facts dict (P4 C6).
+
+        Mirrors :meth:`_episodes_for` and :meth:`_registered_types_for` —
+        leading-underscore signals "not on the GraphBackend Protocol;
+        unit-test substrate only". Callers must bootstrap the tenant
+        first (raises :class:`ValueError` otherwise — same loud-fail
+        posture as :meth:`add_episode`).
+        """
+        if group_id not in self._tenants:
+            raise ValueError(
+                f"_InMemoryGraphBackend._seed_fact: tenant {group_id!r} has not been bootstrapped"
+            )
+        self._facts.setdefault(group_id, {})[fact_id] = FactRecord(
+            fact_id=fact_id,
+            group_id=group_id,
+            valid_from=valid_from,
+            valid_to=valid_to,
+        )
+
+    def set_fact_valid_to(
+        self,
+        *,
+        group_id: str,
+        fact_id: str,
+        valid_to: str,
+    ) -> None:
+        """Set ``valid_to`` on a seeded fact; raises :class:`KeyError` otherwise.
+
+        Per IMPLEMENT 6 amendment A10: KeyError for an unbootstrapped
+        ``group_id`` AND for a missing ``fact_id`` within a bootstrapped
+        tenant. Re-invalidate (calling on an already-stamped fact)
+        OVERWRITES the prior ``valid_to``; the audit trail of the prior
+        stamp lives in the S5 consolidation log, not S1.
+
+        Frozen-dataclass replacement: builds a new :class:`FactRecord`
+        with the updated ``valid_to`` and swaps it into the dict.
+        """
+        if group_id not in self._facts:
+            raise KeyError(
+                f"_InMemoryGraphBackend.set_fact_valid_to: group_id {group_id!r} not bootstrapped"
+            )
+        if fact_id not in self._facts[group_id]:
+            raise KeyError(
+                f"_InMemoryGraphBackend.set_fact_valid_to: fact_id "
+                f"{fact_id!r} not seeded for group_id {group_id!r}"
+            )
+        old = self._facts[group_id][fact_id]
+        self._facts[group_id][fact_id] = FactRecord(
+            fact_id=old.fact_id,
+            group_id=old.group_id,
+            valid_from=old.valid_from,
+            valid_to=valid_to,
+        )
+
+    def iter_facts_with_valid_to(
+        self,
+        *,
+        group_id: str,
+    ) -> Iterable[FactRecord]:
+        """Yield facts under ``group_id`` whose ``valid_to`` is non-NULL.
+
+        Per IMPLEMENT 6 amendment A10: returns an empty list for an
+        unbootstrapped ``group_id`` (read surface is permissive).
+        Sorted by ``fact_id`` ASC for deterministic reconciler output.
+        """
+        records = [r for r in self._facts.get(group_id, {}).values() if r.valid_to is not None]
+        records.sort(key=lambda r: r.fact_id)
+        return records
 
 
 class GraphitiBackend:
@@ -326,6 +482,28 @@ class GraphitiBackend:
             "live Neo4j/FalkorDB read path (P4 commit 5 — sub-plan §j.1)"
         )
 
+    def set_fact_valid_to(  # pragma: no cover - P7
+        self,
+        *,
+        group_id: str,
+        fact_id: str,
+        valid_to: str,
+    ) -> None:
+        raise NotImplementedError(
+            "GraphitiBackend.set_fact_valid_to wires in at P7 alongside the "
+            "live Neo4j/FalkorDB write path (P4 commit 6 — sub-plan §k.1)"
+        )
+
+    def iter_facts_with_valid_to(  # pragma: no cover - P7
+        self,
+        *,
+        group_id: str,
+    ) -> Iterable[FactRecord]:
+        raise NotImplementedError(
+            "GraphitiBackend.iter_facts_with_valid_to wires in at P7 alongside "
+            "the live Neo4j/FalkorDB read path (P4 commit 6 — IMPLEMENT 6 A1)"
+        )
+
 
 class S1Client:
     """Thin façade over a :class:`GraphBackend`, scoped to a single tenant.
@@ -375,3 +553,35 @@ class S1Client:
             group_id=self._tenant_id,
             since_cursor=since_cursor,
         )
+
+    def set_fact_valid_to(
+        self,
+        *,
+        fact_id: str,
+        valid_to: str,
+    ) -> None:
+        """Set ``valid_to`` on one of this tenant's S1 facts (P4 C6).
+
+        Façade over :meth:`GraphBackend.set_fact_valid_to` that pins
+        ``group_id`` to ``self._tenant_id``. Mirrors the C5 façade
+        pattern (sub-plan §k.1 + IMPLEMENT 6 A1) so phase code
+        (``runtime.consolidate.demote`` / ``invalidate``) doesn't thread
+        the tenant_id/group_id consistency by hand.
+        """
+        self._backend.set_fact_valid_to(
+            group_id=self._tenant_id,
+            fact_id=fact_id,
+            valid_to=valid_to,
+        )
+
+    def iter_facts_with_valid_to(self) -> Iterable[FactRecord]:
+        """Yield this tenant's S1 facts whose ``valid_to`` is non-NULL.
+
+        Façade over :meth:`GraphBackend.iter_facts_with_valid_to` that
+        pins ``group_id`` to ``self._tenant_id``. Used by the
+        consolidate-loop reconciler (sub-plan §k.6 + IMPLEMENT 6 A1+A2)
+        to find S1 facts that have been invalidated but lack a covering
+        ``promotion_flags`` row of tier ∈ {demoted, invalidated,
+        backfilled}.
+        """
+        return self._backend.iter_facts_with_valid_to(group_id=self._tenant_id)

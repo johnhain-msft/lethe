@@ -62,11 +62,43 @@ class SqliteLogWriter:
                 (entry.kind, json.dumps(entry.payload, sort_keys=True), appended_at),
             )
 
+    def append_with_conn(self, entry: LogEntry, *, conn: sqlite3.Connection) -> None:
+        """Append one log entry against a caller-supplied connection (P4 C6).
+
+        Per IMPLEMENT 6 amendment A6: phase modules
+        (:mod:`lethe.runtime.consolidate.promote` / ``demote`` /
+        ``invalidate`` / ``_reconciler``) participate in a multi-statement
+        cross-store T2 transaction owned by the caller (the
+        :func:`~lethe.store.shared_conn.shared_store_connection` seam +
+        the phase's ``BEGIN IMMEDIATE`` / ``COMMIT`` boundary). They
+        cannot use :meth:`append` because that opens its own short-lived
+        connection — the resulting INSERT would COMMIT outside the
+        phase's tx and survive a phase ROLLBACK.
+
+        SQL is **schema-qualified as ``main``** (mirrors the C5 amendment
+        A4 audit) so an attached database whose alias also defines
+        ``s5_consolidation_log`` cannot silently shadow the write. Caller
+        owns the transaction — this method does NOT BEGIN / COMMIT /
+        ROLLBACK; do that wrapping the call.
+
+        Per IMPLEMENT 6 amendment A11: ``appended_at`` uses the Z-suffix
+        format (matches the phase event envelope's ``ts_recorded`` /
+        ``ts_valid``) so round-trip determinism is preserved.
+        """
+        if entry.appended_at is None:
+            appended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        else:
+            appended_at = entry.appended_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        conn.execute(
+            f"INSERT INTO main.{S5_LOG_TABLE_NAME}(kind, payload_json, appended_at) "
+            f"VALUES (?, ?, ?)",
+            (entry.kind, json.dumps(entry.payload, sort_keys=True), appended_at),
+        )
+
     def replay(self) -> Iterator[LogEntry]:
         with self._connect() as conn:
             cur = conn.execute(
-                f"SELECT kind, payload_json, appended_at FROM {S5_LOG_TABLE_NAME} "
-                f"ORDER BY seq ASC"
+                f"SELECT kind, payload_json, appended_at FROM {S5_LOG_TABLE_NAME} ORDER BY seq ASC"
             )
             for kind, payload_json, appended_at in cur.fetchall():
                 yield LogEntry(
