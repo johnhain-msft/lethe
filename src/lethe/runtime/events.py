@@ -36,6 +36,15 @@ import importlib
 from collections.abc import Callable, Mapping
 from typing import Any, Final, Literal
 
+#: Allowed values for the ``recall`` event's ``path`` per-type field.
+#: ``"recall"`` events are emitted by the ``recall`` verb (api §2.1);
+#: ``"synthesis"`` events are emitted by the ``recall_synthesis`` verb
+#: (api §2.2). Both share the same envelope shape and event_type.
+RecallPath = Literal["recall", "synthesis"]
+
+_VALID_RECALL_PATHS: Final[frozenset[str]] = frozenset({"recall", "synthesis"})
+
+
 EventType = Literal[
     "remember",
     "recall",
@@ -77,6 +86,12 @@ _COMMON_REQUIRED: Final[frozenset[str]] = frozenset(
 # common-only check until their phase locks the shape.
 _PER_TYPE_REQUIRED: Final[dict[str, frozenset[str]]] = {
     "remember": frozenset({"fact_ids", "decision", "provenance"}),
+    # P3: recall events carry the deterministic recall_id (api §1.4),
+    # the top-k fact_ids surfaced to the caller, and the dispatch path
+    # ("recall" vs "synthesis"). recall_outcome stays common-only at
+    # P3 (D5 — emission deferred to P9; only the recall_id join-key
+    # is plumbed at P3).
+    "recall": frozenset({"recall_id", "fact_ids", "path"}),
 }
 
 
@@ -135,6 +150,35 @@ def validate(event: Mapping[str, object]) -> None:
             raise EventValidationError(
                 "event envelope (event_type='remember') requires non-empty "
                 "fact_ids: list[str]"
+            )
+
+    # recall: fact_ids may be empty (k=0 preferences-only response is a
+    # legitimate zero-event recall — see api §2.1.1 — but a recall event
+    # that *is* emitted MUST carry a non-empty fact_ids list, otherwise
+    # the §8.4 emit-pipeline cannot join it back to scoring outcomes).
+    # path must be one of the documented dispatch values.
+    if event_type == "recall":
+        fact_ids = event.get("fact_ids")
+        if not isinstance(fact_ids, list) or not fact_ids:
+            raise EventValidationError(
+                "event envelope (event_type='recall') requires non-empty "
+                "fact_ids: list[str]"
+            )
+        if not all(isinstance(f, str) for f in fact_ids):
+            raise EventValidationError(
+                "event envelope (event_type='recall') fact_ids must be list[str]"
+            )
+        path = event.get("path")
+        if path not in _VALID_RECALL_PATHS:
+            raise EventValidationError(
+                f"event envelope (event_type='recall') path {path!r} not in "
+                f"{sorted(_VALID_RECALL_PATHS)}"
+            )
+        recall_id_value = event.get("recall_id")
+        if not isinstance(recall_id_value, str) or not recall_id_value:
+            raise EventValidationError(
+                "event envelope (event_type='recall') requires non-empty "
+                "recall_id: str"
             )
 
 

@@ -229,3 +229,91 @@ def test_emit_module_exposes_public_surface() -> None:
     """Sanity that the public symbols are importable via the package alias."""
     assert events.emit is emit
     assert events.validate is validate
+
+
+# ---------------------------------------------------------------------------
+# recall envelopes (P3)
+# ---------------------------------------------------------------------------
+
+
+def _recall_envelope() -> dict[str, Any]:
+    """A complete ``recall`` envelope per scoring §8.2 + §8.5 + P3 per-type extras."""
+    return {
+        "event_id": "01890af0-0000-7000-8000-00000000ff01",
+        "event_type": "recall",
+        "tenant_id": "tenant-a",
+        "ts_recorded": "2026-05-12T17:00:00Z",
+        "ts_valid": "2026-05-12T17:00:00Z",
+        "model_version": "v1.0.0",
+        "weights_version": "sha256:0000000000000000",
+        "contamination_protected": True,
+        "recall_id": "01890af0-0000-7000-8000-00000000ee99",
+        "fact_ids": ["fact-1", "fact-2"],
+        "path": "recall",
+    }
+
+
+def test_validate_accepts_full_recall_envelope() -> None:
+    validate(_recall_envelope())
+
+
+def test_validate_accepts_recall_path_synthesis() -> None:
+    env = _recall_envelope()
+    env["path"] = "synthesis"
+    validate(env)
+
+
+@pytest.mark.parametrize(
+    "missing_field", ["recall_id", "fact_ids", "path"]
+)
+def test_validate_rejects_recall_missing_per_type_extras(
+    missing_field: str,
+) -> None:
+    env = _recall_envelope()
+    del env[missing_field]
+    with pytest.raises(EventValidationError) as excinfo:
+        validate(env)
+    assert missing_field in str(excinfo.value)
+
+
+def test_validate_rejects_recall_with_empty_fact_ids() -> None:
+    env = _recall_envelope()
+    env["fact_ids"] = []
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_recall_with_non_str_fact_ids() -> None:
+    env = _recall_envelope()
+    env["fact_ids"] = ["fact-1", 42]
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_recall_with_unknown_path() -> None:
+    env = _recall_envelope()
+    env["path"] = "synthesize"  # near miss for "synthesis"
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_recall_with_empty_recall_id() -> None:
+    env = _recall_envelope()
+    env["recall_id"] = ""
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_validate_rejects_recall_with_non_str_recall_id() -> None:
+    env = _recall_envelope()
+    env["recall_id"] = 12345
+    with pytest.raises(EventValidationError):
+        validate(env)
+
+
+def test_emit_dispatches_validated_recall_event() -> None:
+    captured: list[dict[str, Any]] = []
+    emit(_recall_envelope(), sink=lambda e: captured.append(dict(e)))
+    assert len(captured) == 1
+    assert captured[0]["event_type"] == "recall"
+    assert captured[0]["path"] == "recall"
