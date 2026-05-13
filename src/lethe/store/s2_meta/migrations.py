@@ -13,6 +13,9 @@ Schema version history:
   sub-plan §6. The two tables are empty stubs at v1 (no production data
   exists yet anywhere in the system at P1), so the v2 migration drops and
   recreates each — no data preservation required.
+- v3 (P3): ``recall_ledger`` columned per facilitator P3 plan §(d). Same
+  drop-and-recreate semantics as v2 (table is an empty stub at v2 — no
+  verb writes to it before P3).
 
 Future migrations (P4+) for tables that may already hold rows MUST use
 ``ALTER TABLE`` rather than drop-and-recreate.
@@ -23,9 +26,13 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-from lethe.store.s2_meta.schema import _DDL_AUDIT_LOG, _DDL_EXTRACTION_LOG
+from lethe.store.s2_meta.schema import (
+    _DDL_AUDIT_LOG,
+    _DDL_EXTRACTION_LOG,
+    _DDL_RECALL_LEDGER,
+)
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 
 
 def _m2_extraction_and_audit_columns(conn: sqlite3.Connection) -> None:
@@ -41,10 +48,24 @@ def _m2_extraction_and_audit_columns(conn: sqlite3.Connection) -> None:
     conn.execute(_DDL_AUDIT_LOG)
 
 
+def _m3_recall_ledger_columns(conn: sqlite3.Connection) -> None:
+    """v2 → v3: column ``recall_ledger`` per facilitator P3 plan §(d).
+
+    The v2 ``recall_ledger`` is an ``(id, created_at)`` stub; no verb has
+    ever written to it (the ``recall`` verb lands at P3 with this exact
+    column shape), so drop-and-recreate is safe. P5+ recall_ledger
+    extensions (e.g. join indexes for ``recall_outcome`` ingest) MUST use
+    ``ALTER TABLE`` because P3+ deployments will hold real ledger rows.
+    """
+    conn.execute("DROP TABLE IF EXISTS recall_ledger")
+    conn.execute(_DDL_RECALL_LEDGER)
+
+
 # Each migration is `(version, callable)` where callable mutates the DB to
 # bring it from `version - 1` to `version`.
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (2, _m2_extraction_and_audit_columns),
+    (3, _m3_recall_ledger_columns),
 )
 
 

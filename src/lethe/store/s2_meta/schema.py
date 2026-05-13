@@ -11,6 +11,9 @@ table's owning verb lands. Schema version history:
 - v2 (P2): ``extraction_log`` columned per gap-06 minimal scaffold;
   ``audit_log`` columned for the ``force_skip_classifier_invoked`` row
   (deployment §6.3 + facilitator P2 sub-plan §6).
+- v3 (P3): ``recall_ledger`` columned per facilitator P3 plan §(d) —
+  one row per ``recall`` invocation, keyed by the deterministic api
+  §1.4 ``recall_id``.
 
 Future: P4 → ``consolidation_state``; P5 → ``promotion_flags`` +
 ``recall_ledger`` extensions; P7 → review_queue indexes; etc.
@@ -49,9 +52,9 @@ S5_LOG_TABLE_NAME = "s5_consolidation_log"
 # P2 columns ``extraction_log`` (per gap-06; minimal scaffold so P3+ doesn't
 # need a re-migration) and ``audit_log`` (per deployment §6.3 + api §3.1
 # ``force_skip_classifier=true`` audit row), so both are dropped from this set.
+# P3 columns ``recall_ledger`` (per facilitator P3 plan §(d)); shrinks again.
 _STUB_TABLES: frozenset[str] = frozenset(
     {
-        "recall_ledger",
         "utility_events",
         "promotion_flags",
         "consolidation_state",
@@ -151,6 +154,27 @@ _DDL_AUDIT_LOG = (
     ")"
 )
 
+# recall_ledger: P3 fold per facilitator P3 plan §(d). One row per
+# `recall` invocation, keyed by the deterministic api §1.4 recall_id.
+# The verb does INSERT OR IGNORE on the PK so a legitimate replay (same
+# inputs → same recall_id → same payload) is a no-op; same-PK +
+# different-payload is treated as a substrate bug at the verb layer.
+# `top_k_fact_ids` is a JSON-encoded list[str]; an index lands at P9
+# alongside the recall_outcome ingest path.
+_DDL_RECALL_LEDGER = (
+    "CREATE TABLE IF NOT EXISTS recall_ledger ("
+    " recall_id TEXT PRIMARY KEY,"
+    " tenant_id TEXT NOT NULL,"
+    " query_hash TEXT NOT NULL,"
+    " ts_recorded TEXT NOT NULL,"
+    " classified_intent TEXT NOT NULL,"
+    " weights_version TEXT NOT NULL,"
+    " top_k_fact_ids TEXT NOT NULL,"
+    " response_envelope_blob BLOB NOT NULL,"
+    " created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    ")"
+)
+
 # S5 consolidation log (lives inside S2 per facilitator §(g) lock).
 _DDL_S5_LOG = (
     f"CREATE TABLE IF NOT EXISTS {S5_LOG_TABLE_NAME} ("
@@ -212,12 +236,14 @@ class S2Schema:
                 conn.execute(_DDL_EXTRACTION_LOG)
             elif name == "audit_log":
                 conn.execute(_DDL_AUDIT_LOG)
+            elif name == "recall_ledger":
+                conn.execute(_DDL_RECALL_LEDGER)
             else:
                 # Defensive: if a name is added to S2_TABLE_NAMES without a
                 # matching DDL branch, fail loudly rather than silently drop.
                 raise RuntimeError(f"S2 table {name!r} has no DDL branch")
         conn.execute(_DDL_S5_LOG)
         conn.execute(
-            "INSERT OR REPLACE INTO _lethe_meta(key, value) VALUES ('schema_version', '2')"
+            "INSERT OR REPLACE INTO _lethe_meta(key, value) VALUES ('schema_version', '3')"
         )
         return conn

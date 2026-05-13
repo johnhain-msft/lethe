@@ -93,22 +93,3 @@ def bootstrap(tenant_id: str, storage_root: Path) -> TenantBootstrap:
         s4_ready=s4_ready,
         s5_ready=s5_ready,
     )
-
-
-def preferences_prepend(tenant_id: str, storage_root: Path) -> list[str]:
-    """Return preference page texts to prepend to a ``recall`` response.
-
-    Per composition §3.5, this is the always-load preference path: pages
-    tagged ``kind=preference`` in S4a are concatenated and prepended to
-    every ``recall`` response under a ``preferences[]`` field.
-
-    P1: returns ``[]`` (the qmd-class index over S4a lands in P3 with
-    ``recall_synthesis``). The function exists so the IMPL §2.1 exit gate
-    "preferences-prepend path returns empty" is exercisable end-to-end.
-    """
-    if not tenant_id:
-        raise ValueError("tenant_id must be a non-empty string")
-    # storage_root is unused at P1 but pinned in the signature so callers
-    # can't drift to a one-arg shape that breaks at P3.
-    _ = storage_root
-    return []
